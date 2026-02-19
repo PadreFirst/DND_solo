@@ -49,6 +49,12 @@ CHAR_Q4 = "4️⃣ What <b>drives</b> your character? Their goal or motivation? 
 
 CHAR_Q5 = "5️⃣ Tell me something <b>unusual</b> about them. A strange habit, a dark secret, a distinctive trait — anything."
 
+CHAR_EXTRA = (
+    "✨ Great! Anything else you'd like to add about your character? "
+    "Appearance, habits, fears, relationships, fighting style — anything you feel matters.\n\n"
+    "<i>Or just type 'no' / 'done' if you're happy.</i>"
+)
+
 CHAR_GENERATING = "⏳ Creating character... This will take a few seconds."
 
 CHAR_REVIEW = (

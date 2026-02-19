@@ -294,14 +294,25 @@ async def handle_onboarding_text(message: Message, user: User, db: AsyncSession)
     if state == OnboardingState.CHAR_Q5_QUIRK:
         gs = await ensure_session(user, db)
         gs.world_state = _update_char_answers(gs.world_state, "quirk", text)
+        user.onboarding_state = OnboardingState.CHAR_EXTRA
+        await message.answer(t("CHAR_EXTRA", user.language), parse_mode="HTML")
+        return True
+
+    if state == OnboardingState.CHAR_EXTRA:
+        gs = await ensure_session(user, db)
         import json
-        answers = json.loads(gs.world_state) if gs.world_state != "{}" else {}
+        answers = json.loads(gs.world_state) if gs.world_state and gs.world_state != "{}" else {}
+
+        skip_words = {"нет", "no", "готово", "done", "нет спасибо", "skip", "-", "ок", "ok"}
+        extra = "" if text.lower().strip() in skip_words else f" Additional details: {text}"
+
         desc = (
             f"Race: {answers.get('race', 'Human')}. "
             f"Class: {answers.get('class', 'Fighter')}. "
             f"Personality: {answers.get('personality', '')}. "
             f"Motivation: {answers.get('motivation', '')}. "
             f"Unusual trait: {answers.get('quirk', '')}."
+            f"{extra}"
         )
         gs.world_state = "{}"
         await _generate_char(message, user, desc, db)

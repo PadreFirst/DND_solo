@@ -75,6 +75,7 @@ class OnboardingState(str, enum.Enum):
     CHAR_Q3_PERSONALITY = "char_q3_personality"
     CHAR_Q4_MOTIVATION = "char_q4_motivation"
     CHAR_Q5_QUIRK = "char_q5_quirk"
+    CHAR_EXTRA = "char_extra"
     CHAR_GENERATING = "char_generating"
     CHAR_REVIEW = "char_review"
     MISSION_INTRO = "mission_intro"
