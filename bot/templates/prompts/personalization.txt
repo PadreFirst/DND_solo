@@ -1,0 +1,19 @@
+Analyze the following player interaction history and determine their gameplay preferences.
+
+RECENT INTERACTIONS:
+{interactions}
+
+CURRENT PREFERENCE WEIGHTS:
+{current_weights}
+
+For each dimension, output a value from 0.0 to 1.0 based on observed behavior:
+- combat_pref: How much does the player seek combat? (choosing to fight, engaging aggressively, enjoying battle descriptions)
+- puzzle_pref: How much does the player enjoy puzzles? (engaging with riddles, investigating clues, solving problems)
+- dialogue_pref: How much does the player enjoy NPC interaction? (long conversations, asking questions, building relationships)
+- exploration_pref: How much does the player enjoy exploring? (investigating rooms, going off the beaten path, examining objects)
+- romance_tolerance: How open is the player to romantic/flirtatious content? (responding positively to NPC flirting, initiating romance)
+- gore_tolerance: How does the player react to graphic violence? (seeking it out vs. avoiding it)
+- humor_pref: Does the player enjoy humor? (making jokes, responding well to funny NPCs)
+- engagement_level: Overall engagement — are they writing long responses, responding quickly, being creative?
+
+Also provide a brief reasoning for your analysis.

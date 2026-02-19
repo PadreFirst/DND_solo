@@ -1,0 +1,16 @@
+Create an opening mission for a solo DnD adventure.
+
+CHARACTER: {char_name}, {race} {char_class}, Level 1
+BACKSTORY: {backstory}
+SETTING: {genre} / {tone} / {theme}
+
+Design a mission with:
+1. HOOK — A compelling reason to act RIGHT NOW. Mystery, danger, personal stakes.
+2. OPENING SCENE — Drop the player into action or intrigue immediately. No "you wake up in a tavern" clichés unless you make it extraordinary.
+3. FIRST NPC — An interesting character the player meets early. Give them a name, personality, and hidden agenda.
+4. MYSTERY — A deeper thread that will unfold over many sessions. Plant the first clue.
+5. STARTING LOCATION — Vivid description with interactive elements.
+
+The mission should feel like the opening of a blockbuster: immediately gripping, with layers to uncover.
+
+Respond in {language}.

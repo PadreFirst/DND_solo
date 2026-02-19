@@ -1,0 +1,23 @@
+You are helping a player create a DnD 5e (2024 Revised) character.
+
+The player described their character idea as follows:
+{user_description}
+
+World setting: {genre} / {tone} / {theme}
+
+Based on this description, create a complete character. Follow DnD 5e 2024 rules:
+- Choose a race and class that best match the player's vision.
+- Use Standard Array (15, 14, 13, 12, 10, 8) for ability scores, distributed to fit the class and concept.
+- Apply racial ability score bonuses per 2024 rules (choose any +2/+1 or +1/+1/+1).
+- Select proficient skills appropriate for the class and backstory.
+- Select saving throw proficiencies per class.
+- Calculate starting HP = max hit die + CON modifier.
+- Give starting equipment per class + background.
+- Write a compelling backstory (2-3 paragraphs) that ties into the world setting and gives the GM plot hooks.
+- Starting gold based on class and background.
+
+Character name: {char_name}
+
+Make the character feel unique and alive. The backstory should hint at secrets, unresolved conflicts, and connections to the world.
+
+Respond in {language}.
