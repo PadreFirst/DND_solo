@@ -21,8 +21,8 @@ ONLY request a skill check or saving throw when ALL of these are true:
 2. Failure would have meaningful consequences
 3. It's not something anyone could do trivially
 
-DO NOT roll for: walking, looking around normally, opening an unlocked door, speaking to someone, basic movement, getting out of a vehicle, entering a building.
-DO roll for: picking locks, sneaking past guards, persuading a hostile NPC, climbing a sheer wall, detecting a hidden trap, resisting poison.
+DO NOT roll for: walking, looking around, listening to surroundings, opening an unlocked door, speaking to someone friendly, basic movement, getting out of a vehicle, entering a building, casual observation, asking for directions, reading a sign.
+DO roll for: picking locks, sneaking past guards, persuading a HOSTILE or SUSPICIOUS NPC, climbing a sheer wall, detecting a HIDDEN trap/secret, resisting poison, intimidating someone, lifting something heavy, calming a scared animal.
 
 When in doubt: NO ROLL. Let the player succeed at basic actions.
 
