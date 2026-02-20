@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 
 from aiogram import F, Router
 from aiogram.enums import ChatAction
@@ -173,7 +174,8 @@ async def on_char_review(cb: CallbackQuery, db: AsyncSession) -> None:
     char = await ensure_character(user, db)
     gs = await ensure_session(user, db)
     user.onboarding_state = OnboardingState.MISSION_INTRO
-    await cb.message.edit_text(t("MISSION_GENERATING", user.language), parse_mode="HTML")
+    wait = random.randint(40, 75)
+    await cb.message.edit_text(t("MISSION_GENERATING", user.language, wait=str(wait)), parse_mode="HTML")
     await cb.answer()
 
     try:
@@ -315,7 +317,8 @@ async def _generate_char(message: Message, user: User, description: str, db: Asy
     gs = await ensure_session(user, db)
     prev_state = user.onboarding_state
     user.onboarding_state = OnboardingState.CHAR_GENERATING
-    await message.answer(t("CHAR_GENERATING", user.language), parse_mode="HTML")
+    wait = random.randint(40, 75)
+    await message.answer(t("CHAR_GENERATING", user.language, wait=str(wait)), parse_mode="HTML")
 
     try:
         world_data = json.loads(gs.world_state) if gs.world_state and gs.world_state != "{}" else {}

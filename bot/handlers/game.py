@@ -26,7 +26,7 @@ from bot.utils.formatters import (
     truncate_for_telegram,
 )
 from bot.utils.i18n import t
-from bot.utils.keyboards import actions_keyboard, game_menu_keyboard, inventory_list_keyboard
+from bot.utils.keyboards import actions_keyboard, game_menu_keyboard, inventory_list_keyboard, rest_keyboard
 
 log = logging.getLogger(__name__)
 router = Router(name="game")
@@ -126,6 +126,68 @@ async def on_game_menu(cb: CallbackQuery, db: AsyncSession) -> None:
         await cb.message.answer(
             t("LOCATION_INFO", user.language, location=gs.current_location), parse_mode="HTML"
         )
+        await cb.answer()
+        return
+
+    if action == "rest":
+        await cb.message.edit_reply_markup(reply_markup=rest_keyboard(user.language))
+        await cb.answer()
+        return
+
+    if action == "short_rest":
+        char = await ensure_character(user, db)
+        result = engine.short_rest(char)
+        await cb.message.answer(f"☀️ {result}", parse_mode="HTML")
+        await cb.answer()
+        return
+
+    if action == "long_rest":
+        char = await ensure_character(user, db)
+        result = engine.long_rest(char)
+        await cb.message.answer(f"🌙 {result}", parse_mode="HTML")
+        await cb.answer()
+        return
+
+    if action == "inspect":
+        await _typing(cb)
+        char = await ensure_character(user, db)
+        gs = await ensure_session(user, db)
+        ctx = await build_context(user, char, gs, db)
+        prompt = (
+            f"{ctx}\n\nThe player wants a tactical assessment of the current situation. "
+            f"Describe what they see, hear, smell. Mention any threats, opportunities, "
+            f"or notable details. Be specific. Write in {user.language}. Use HTML formatting."
+        )
+        try:
+            text = await generate_narrative(prompt, content_tier=user.content_tier.value)
+            text = md_to_html(text)
+            await cb.message.answer(truncate_for_telegram(f"🔎 {text}", 3800), parse_mode="HTML")
+        except Exception as e:
+            log.exception("Inspect failed")
+            err = e.user_message(user.language) if isinstance(e, GeminiError) else t("ERROR", user.language)
+            await cb.message.answer(err, parse_mode="HTML")
+        await cb.answer()
+        return
+
+    if action == "askgm":
+        await _typing(cb)
+        char = await ensure_character(user, db)
+        gs = await ensure_session(user, db)
+        ctx = await build_context(user, char, gs, db)
+        prompt = (
+            f"{ctx}\n\nThe player asks the GM for advice. Provide helpful mechanical tips: "
+            f"suggest what skills/items might be useful, remind them of abilities they can use, "
+            f"hint at possible strategies. Don't reveal hidden information. "
+            f"Write in {user.language}. Use HTML formatting."
+        )
+        try:
+            text = await generate_narrative(prompt, content_tier=user.content_tier.value)
+            text = md_to_html(text)
+            await cb.message.answer(truncate_for_telegram(f"❓ {text}", 3800), parse_mode="HTML")
+        except Exception as e:
+            log.exception("Ask GM failed")
+            err = e.user_message(user.language) if isinstance(e, GeminiError) else t("ERROR", user.language)
+            await cb.message.answer(err, parse_mode="HTML")
         await cb.answer()
         return
 
@@ -237,16 +299,17 @@ async def _process_player_action(
         elif sc.stat == "current_hp" and sc.delta > 0:
             engine.apply_healing(char, sc.delta)
 
-    for ic in decision.inventory_changes:
-        inv = char.inventory
-        if ic.action == "add":
-            inv.append({"name": ic.name, "quantity": ic.quantity,
-                        "weight": ic.weight, "description": ic.description})
-            mechanics_lines.append(f"🎒 +{ic.name}")
-        elif ic.action == "remove":
-            inv = [i for i in inv if i.get("name", "").lower() != ic.name.lower()]
-            mechanics_lines.append(f"🎒 -{ic.name}")
-        char.inventory = inv
+    if decision.inventory_changes:
+        changes = [
+            {"name": ic.name, "quantity": ic.quantity, "action": ic.action,
+             "description": ic.description}
+            for ic in decision.inventory_changes
+        ]
+        for ic in decision.inventory_changes:
+            prefix = "+" if ic.action != "remove" else "-"
+            mechanics_lines.append(f"🎒 {prefix}{ic.name}")
+        char.inventory = engine.merge_inventory(char.inventory, changes)
+        char.inventory = engine.ensure_ammo(char.inventory)
 
     if decision.gold_change:
         char.gold = max(0, char.gold + decision.gold_change)

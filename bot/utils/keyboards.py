@@ -157,6 +157,20 @@ def actions_keyboard(actions: list[str], lang: str = "en") -> InlineKeyboardMark
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def rest_keyboard(lang: str) -> InlineKeyboardMarkup:
+    if lang == "ru":
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="☀️ Короткий отдых", callback_data="gamemenu:short_rest")],
+            [InlineKeyboardButton(text="🌙 Длинный отдых", callback_data="gamemenu:long_rest")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="gamemenu:open")],
+        ])
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="☀️ Short Rest", callback_data="gamemenu:short_rest")],
+        [InlineKeyboardButton(text="🌙 Long Rest", callback_data="gamemenu:long_rest")],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="gamemenu:open")],
+    ])
+
+
 def game_menu_keyboard(lang: str) -> InlineKeyboardMarkup:
     if lang == "ru":
         return InlineKeyboardMarkup(inline_keyboard=[
@@ -169,8 +183,12 @@ def game_menu_keyboard(lang: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🗺 Локация", callback_data="gamemenu:location"),
             ],
             [
-                InlineKeyboardButton(text="🔄 Новое приключение", callback_data="gamemenu:newgame"),
-                InlineKeyboardButton(text="❓ Помощь", callback_data="gamemenu:help"),
+                InlineKeyboardButton(text="🛏 Отдых", callback_data="gamemenu:rest"),
+                InlineKeyboardButton(text="🔎 Осмотр", callback_data="gamemenu:inspect"),
+            ],
+            [
+                InlineKeyboardButton(text="❓ Спросить ГМа", callback_data="gamemenu:askgm"),
+                InlineKeyboardButton(text="🔄 Новая игра", callback_data="gamemenu:newgame"),
             ],
             [InlineKeyboardButton(text="⬅️ Назад к игре", callback_data="gamemenu:close")],
         ])
@@ -184,8 +202,12 @@ def game_menu_keyboard(lang: str) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🗺 Location", callback_data="gamemenu:location"),
         ],
         [
-            InlineKeyboardButton(text="🔄 New adventure", callback_data="gamemenu:newgame"),
-            InlineKeyboardButton(text="❓ Help", callback_data="gamemenu:help"),
+            InlineKeyboardButton(text="🛏 Rest", callback_data="gamemenu:rest"),
+            InlineKeyboardButton(text="🔎 Inspect", callback_data="gamemenu:inspect"),
+        ],
+        [
+            InlineKeyboardButton(text="❓ Ask GM", callback_data="gamemenu:askgm"),
+            InlineKeyboardButton(text="🔄 New game", callback_data="gamemenu:newgame"),
         ],
         [InlineKeyboardButton(text="⬅️ Back to game", callback_data="gamemenu:close")],
     ])

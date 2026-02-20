@@ -53,25 +53,61 @@ def format_character_sheet(char: Character) -> str:
         f"📋 Skills: {skills_str}\n"
         f"💀 Conditions: {conditions_str}\n"
         f"\n"
-        f"🎒 Items: {inv_count}  |  💰 Gold: {char.gold}"
+        f"🎒 Items: {inv_count}  |  💰 Gold: {char.gold}\n"
+        f"🎲 Hit Dice: {char.hit_dice_current}/{char.hit_dice_max} ({char.hit_dice_face})"
     )
+
+
+_TYPE_ICONS = {
+    "weapon": "⚔️", "armor": "🛡", "consumable": "🧪",
+    "ammo": "🏹", "misc": "📦",
+}
 
 
 def format_inventory(char: Character) -> str:
     if not char.inventory:
         return "🎒 <b>Inventory</b>\n\n<i>Empty</i>"
 
-    lines = ["🎒 <b>Inventory</b>\n"]
+    equipped_lines = []
+    other_lines = []
     for i, item in enumerate(char.inventory, 1):
         name = item.get("name", "???")
         qty = item.get("quantity", 1)
-        desc = item.get("description", "")
-        qty_str = f" x{qty}" if qty > 1 else ""
-        desc_str = f" — <i>{desc}</i>" if desc else ""
-        lines.append(f"{i}. {name}{qty_str}{desc_str}")
+        itype = item.get("type", "misc")
+        icon = _TYPE_ICONS.get(itype, "📦")
+        mechanics = item.get("mechanics", {})
+        if isinstance(mechanics, str):
+            import json
+            try:
+                mechanics = json.loads(mechanics)
+            except Exception:
+                mechanics = {}
 
-    lines.append(f"\n💰 Gold: {char.gold}")
-    return "\n".join(lines)
+        detail = ""
+        if itype == "weapon" and mechanics:
+            detail = f" [{mechanics.get('damage', '')} {mechanics.get('type', '')}]"
+        elif itype == "armor" and mechanics:
+            detail = f" [AC {mechanics.get('ac', '')}, {mechanics.get('type', '')}]"
+
+        qty_str = f" x{qty}" if qty > 1 else ""
+        line = f"{icon} {name}{detail}{qty_str}"
+
+        if item.get("equipped"):
+            equipped_lines.append(line)
+        else:
+            other_lines.append(line)
+
+    parts = ["🎒 <b>Inventory</b>\n"]
+    if equipped_lines:
+        parts.append("<b>Equipped:</b>")
+        parts.extend(equipped_lines)
+        parts.append("")
+    if other_lines:
+        parts.append("<b>Backpack:</b>")
+        parts.extend(other_lines)
+
+    parts.append(f"\n💰 Gold: {char.gold}")
+    return "\n".join(parts)
 
 
 def format_dice_roll(dice_str: str, rolls: list[int], modifier: int, total: int,

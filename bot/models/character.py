@@ -51,6 +51,10 @@ class Character(Base):
     death_save_successes: Mapped[int] = mapped_column(default=0)
     death_save_failures: Mapped[int] = mapped_column(default=0)
 
+    hit_dice_current: Mapped[int] = mapped_column(default=1)
+    hit_dice_max: Mapped[int] = mapped_column(default=1)
+    hit_dice_face: Mapped[str] = mapped_column(String(5), default="d8")
+
     spell_slots_json: Mapped[str] = mapped_column(Text, default="{}")
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

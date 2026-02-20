@@ -54,9 +54,9 @@ CHAR_EXTRA = (
     "<i>Or type 'no' if you're good.</i>"
 )
 
-CHAR_GENERATING = "⏳ Creating character..."
+CHAR_GENERATING = "⏳ Creating character... (≈{wait}s)"
 CHAR_REVIEW = "📋 <b>Character ready!</b>\n\n{sheet}\n\n📖 <b>Backstory:</b>\n{backstory}"
-MISSION_GENERATING = "🌍 Generating your starting mission..."
+MISSION_GENERATING = "🌍 Generating your starting mission... (≈{wait}s)"
 GAME_START = "🎮 <b>The adventure begins!</b>\n\n{opening_scene}"
 
 LEVEL_UP = "🎉 <b>LEVEL UP!</b>\n\n{name} → Lv.{level}\nHP: {old_hp} → {new_hp} | Proficiency: +{prof}"

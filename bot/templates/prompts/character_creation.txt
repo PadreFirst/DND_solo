@@ -10,20 +10,22 @@ PLAYER'S CHARACTER CONCEPT:
 Name: {char_name}
 Description: {user_description}
 
-RULES — YOU MUST FOLLOW ALL OF THESE:
-1. Choose race and class that BEST match the player's description. If description implies a non-standard class/race combo, still honor it.
-2. Use Standard Array (15, 14, 13, 12, 10, 8) for ability scores. Distribute them to match the class primary abilities AND the player's concept. Apply racial bonuses (+2/+1 or +1/+1/+1). FINAL STATS MUST NOT ALL BE 10.
-3. Select 2-4 proficient skills appropriate for class + backstory.
-4. Select saving throw proficiencies per class rules.
-5. Give starting equipment per class + background. Include AT LEAST 4-6 items (weapon, armor/clothing, adventuring gear, tools, etc.). Each item must have name, quantity, weight, and description.
-6. Starting gold: 10-50 based on background.
-7. Write a compelling backstory (2-3 paragraphs) that:
-   - Ties into the WORLD SETTING above
-   - Reflects the player's description
-   - Includes hooks for adventure (unresolved conflicts, secrets, goals)
-   - Explains HOW the character got their skills
-8. personality_summary: 1-2 sentences capturing the character's essence.
+IMPORTANT: You provide ONLY the narrative/creative fields. The game engine will handle ALL mechanics (stats, HP, AC, inventory, gold) automatically via Standard Array and class rules. Do NOT output stats or inventory.
 
-CRITICAL: Every field must be filled with meaningful, non-default values. Do NOT leave stats at 10. Do NOT leave inventory empty. Do NOT leave backstory blank.
+YOUR TASK — fill these fields:
+1. race: Pick a race that fits the description (Human, Elf, Dwarf, Half-Orc, Tiefling, Halfling, Gnome, Dragonborn, Half-Elf, etc.)
+2. char_class: Pick ONE DnD class that best matches (Fighter, Wizard, Rogue, Cleric, Ranger, Paladin, Bard, Barbarian, Monk, Sorcerer, Warlock, Druid)
+3. proficient_skills: Choose 2-4 skills appropriate for the class and backstory
+4. backstory: Write 2-3 COMPELLING paragraphs that:
+   - Tie deeply into the WORLD SETTING
+   - Reflect the player's description
+   - Include hooks for adventure (unresolved conflicts, secrets, goals)
+   - Explain how the character learned their trade
+   - Match the NARRATIVE TONE
+5. personality_summary: 1-2 vivid sentences capturing the character's essence
 
-Respond in {language}.
+CRITICAL RULES:
+- backstory MUST be 2-3 paragraphs, never empty or one sentence
+- Race and class MUST match the player's concept, not generic defaults
+- proficient_skills must be real DnD skills (Acrobatics, Stealth, Perception, etc.)
+- Write everything in {language}

@@ -21,6 +21,11 @@ from bot.services.gemini import generate_text
 log = logging.getLogger(__name__)
 
 
+def _mod_str(score: int) -> str:
+    mod = (score - 10) // 2
+    return f"{score}({mod:+d})"
+
+
 async def build_context(
     user: User,
     char: Character,
@@ -30,7 +35,7 @@ async def build_context(
     """Assemble the full context block that goes into every Gemini request."""
     parts: list[str] = []
 
-    parts.append(_build_character_block(char))
+    parts.append(_build_system_info(char))
     parts.append(_build_world_block(session))
     parts.append(await _build_memory_block(user.id, db))
 
@@ -47,15 +52,70 @@ async def build_context(
 
     parts.append(_build_preferences_block(user))
 
-    return "\n\n".join(parts)
+    return "\n\n".join(p for p in parts if p)
 
 
-def _build_character_block(char: Character) -> str:
-    sheet = char.to_sheet_dict()
-    return (
-        f"=== CHARACTER SHEET (source of truth) ===\n"
-        f"{json.dumps(sheet, indent=2, ensure_ascii=False)}"
-    )
+def _build_system_info(char: Character) -> str:
+    """Structured [SYSTEM INFO] block — single source of truth for the AI."""
+    equipped_items = []
+    inv_items = []
+    for item in char.inventory:
+        name = item.get("name", "???")
+        qty = item.get("quantity", 1)
+        itype = item.get("type", "misc")
+        mechanics = item.get("mechanics", {})
+        if isinstance(mechanics, str):
+            try:
+                mechanics = json.loads(mechanics)
+            except (json.JSONDecodeError, TypeError):
+                mechanics = {}
+
+        detail = ""
+        if itype == "weapon" and mechanics:
+            detail = f" ({mechanics.get('damage', '')} {mechanics.get('type', '')})"
+        elif itype == "armor" and mechanics:
+            detail = f" (AC {mechanics.get('ac', '')}, {mechanics.get('type', '')})"
+
+        label = f"{name}{detail}" + (f" x{qty}" if qty > 1 else "")
+
+        if item.get("equipped"):
+            equipped_items.append(label)
+        else:
+            inv_items.append(label)
+
+    conditions = char.conditions
+    cond_str = ", ".join(conditions) if conditions else "None"
+
+    spell_slots = char.spell_slots
+    slots_parts = []
+    for lvl in sorted(spell_slots.keys()):
+        slot = spell_slots[lvl]
+        if isinstance(slot, dict):
+            slots_parts.append(f"{lvl}: {slot.get('current', 0)}/{slot.get('max', 0)}")
+
+    lines = [
+        "[SYSTEM INFO]",
+        f"Player: {char.name}, Level {char.level} {char.race} {char.char_class}",
+        f"HP: {char.current_hp}/{char.max_hp}, AC: {char.armor_class}",
+        f"Attributes: STR {_mod_str(char.strength)} DEX {_mod_str(char.dexterity)} "
+        f"CON {_mod_str(char.constitution)} INT {_mod_str(char.intelligence)} "
+        f"WIS {_mod_str(char.wisdom)} CHA {_mod_str(char.charisma)}",
+        f"Proficiency: +{char.proficiency_bonus}",
+        f"Skills: {', '.join(char.proficient_skills) or 'None'}",
+        f"Saves: {', '.join(char.saving_throw_proficiencies) or 'None'}",
+        f"Equipped: {', '.join(equipped_items) or 'None'}",
+        f"Inventory: {', '.join(inv_items) or 'Empty'}",
+        f"Gold: {char.gold}",
+        f"Hit Dice: {char.hit_dice_current}/{char.hit_dice_max} ({char.hit_dice_face})",
+        f"Conditions: {cond_str}",
+        f"XP: {char.xp}",
+    ]
+    if slots_parts:
+        lines.append(f"Spell Slots: {', '.join(slots_parts)}")
+    if char.backstory:
+        lines.append(f"Backstory: {char.backstory[:300]}")
+    lines.append("[/SYSTEM INFO]")
+    return "\n".join(lines)
 
 
 def _build_world_block(session: GameSession) -> str:

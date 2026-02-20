@@ -11,7 +11,7 @@ import logging
 from typing import Any
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from bot.config import settings
 
@@ -144,6 +144,8 @@ class NPCAction(BaseModel):
 
 
 class MechanicsDecision(BaseModel):
+    model_config = ConfigDict(coerce_numbers_to_str=True)
+
     narration_context: str = ""
     skill_checks: list[SkillCheckRequest] = Field(default_factory=list)
     saving_throws: list[SavingThrowRequest] = Field(default_factory=list)
@@ -157,28 +159,20 @@ class MechanicsDecision(BaseModel):
     gold_change: int = 0
     location_change: str = ""
     quest_update: str = ""
-    available_actions: list[str] = Field(default_factory=lambda: ["Look around", "Talk", "Attack", "Use item"])
+    available_actions: list[str] = Field(default_factory=list)
     is_combat_start: bool = False
     is_combat_end: bool = False
     important_event: str = ""
 
 
 class CharacterProposal(BaseModel):
+    """AI only fills narrative fields. Stats, HP, AC, inventory are computed in code."""
     name: str = ""
-    race: str = ""
-    char_class: str = ""
-    strength: int = 10
-    dexterity: int = 10
-    constitution: int = 10
-    intelligence: int = 10
-    wisdom: int = 10
-    charisma: int = 10
-    proficient_skills: list[str] = Field(default_factory=list)
-    saving_throws: list[str] = Field(default_factory=list)
-    backstory: str = ""
-    starting_inventory: list[InventoryItem] = Field(default_factory=list)
-    starting_gold: int = 0
-    personality_summary: str = ""
+    race: str = Field(default="Human", description="Character race: Human, Elf, Dwarf, etc.")
+    char_class: str = Field(default="Fighter", description="DnD class: Fighter, Wizard, Rogue, Cleric, etc.")
+    proficient_skills: list[str] = Field(default_factory=list, description="2-4 skill proficiencies")
+    backstory: str = Field(default="", description="2-3 paragraph backstory matching the world")
+    personality_summary: str = Field(default="", description="Short personality description")
 
 
 class MissionProposal(BaseModel):
@@ -213,13 +207,17 @@ class GeminiError(Exception):
     def user_message(self, lang: str) -> str:
         s = str(self.original)
         ru = lang == "ru"
-        if "location" in s:
+        if "User location is not supported" in s:
             return "⚠️ API недоступен из региона. Проверь GEMINI_PROXY." if ru else "⚠️ API geo-blocked. Check GEMINI_PROXY."
         if "429" in s or "RESOURCE_EXHAUSTED" in s:
             return "⚠️ Лимит запросов. Подожди минуту." if ru else "⚠️ Rate limited. Wait a minute."
-        if "API key" in s or "401" in s:
+        if "API key" in s or "401" in s or "leaked" in s.lower():
             return "⚠️ Неверный API-ключ." if ru else "⚠️ Invalid API key."
-        return f"⚠️ Ошибка AI: {s[:150]}" if ru else f"⚠️ AI error: {s[:150]}"
+        if "503" in s or "UNAVAILABLE" in s:
+            return "⚠️ Модель перегружена. Попробуй через минуту." if ru else "⚠️ Model overloaded. Try in a minute."
+        if "validation error" in s.lower():
+            return "⚠️ AI ответил неожиданно. Попробуй ещё раз." if ru else "⚠️ AI responded unexpectedly. Try again."
+        return f"⚠️ Ошибка AI: {s[:120]}" if ru else f"⚠️ AI error: {s[:120]}"
 
 
 def _make_example(schema: type[BaseModel]) -> str:
@@ -258,6 +256,31 @@ def _make_example(schema: type[BaseModel]) -> str:
     return json.dumps(example, indent=2, ensure_ascii=False)
 
 
+def _coerce_types(raw: dict, schema: type[BaseModel]) -> dict:
+    """Best-effort type coercion so Gemini's sloppy JSON doesn't fail validation."""
+    hints = schema.model_fields
+    for key, field in hints.items():
+        if key not in raw:
+            continue
+        val = raw[key]
+        ann = str(field.annotation)
+        if "int" in ann and isinstance(val, str):
+            try:
+                raw[key] = int(float(val)) if val.replace(".", "").replace("-", "").isdigit() else 0
+            except (ValueError, TypeError):
+                raw[key] = 0
+        elif "float" in ann and isinstance(val, str):
+            try:
+                raw[key] = float(val)
+            except (ValueError, TypeError):
+                raw[key] = 0.0
+        elif "bool" in ann and isinstance(val, str):
+            raw[key] = val.lower() in ("true", "1", "yes")
+        elif "str" in ann and not isinstance(val, str):
+            raw[key] = str(val) if val is not None else ""
+    return raw
+
+
 async def generate_structured(
     prompt: str,
     schema: type[BaseModel],
@@ -280,7 +303,7 @@ async def generate_structured(
             contents=[{"parts": [{"text": full_prompt}]}],
             generation_config={
                 "responseMimeType": "application/json",
-                "temperature": 0.8,
+                "temperature": 0.7,
                 "maxOutputTokens": 4096,
             },
             safety_settings=SAFETY_OFF,
@@ -288,12 +311,15 @@ async def generate_structured(
         text = _extract_text(data)
         log.debug("Gemini structured response: %s", text[:500])
         raw = json.loads(text)
-        if "properties" in raw and "type" in raw.get("properties", {}).get(list(raw["properties"].keys())[0], {}):
-            log.warning("Gemini returned schema instead of data, extracting defaults")
-            flat = {}
-            for k, v in raw["properties"].items():
-                flat[k] = v.get("default", v.get("type", ""))
-            raw = flat
+        if "properties" in raw and isinstance(raw.get("properties"), dict):
+            first_val = next(iter(raw["properties"].values()), {})
+            if isinstance(first_val, dict) and "type" in first_val:
+                log.warning("Gemini returned schema instead of data, extracting defaults")
+                flat = {}
+                for k, v in raw["properties"].items():
+                    flat[k] = v.get("default", v.get("type", ""))
+                raw = flat
+        raw = _coerce_types(raw, schema)
         return schema.model_validate(raw)
     except GeminiError:
         raise
