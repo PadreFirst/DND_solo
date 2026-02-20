@@ -198,14 +198,26 @@ class GeminiError(Exception):
 
 
 def _schema_hint(schema: type[BaseModel]) -> str:
-    s = schema.model_json_schema()
-    props = s.get("properties", {})
-    out = {}
-    for k, v in props.items():
-        t = v.get("type", "string")
-        d = v.get("default")
-        out[k] = f"{t}" + (f" (default: {d})" if d is not None and d != "" and d != [] else "")
-    return json.dumps(out, indent=2, ensure_ascii=False)
+    full = schema.model_json_schema()
+    defs = full.pop("$defs", {})
+
+    def _resolve(obj: dict) -> dict:
+        if "$ref" in obj:
+            ref_name = obj["$ref"].split("/")[-1]
+            return _resolve(defs.get(ref_name, {}))
+        if obj.get("type") == "array" and "items" in obj:
+            obj = dict(obj)
+            obj["items"] = _resolve(obj["items"])
+        if "properties" in obj:
+            obj = dict(obj)
+            obj["properties"] = {k: _resolve(v) for k, v in obj["properties"].items()}
+        return obj
+
+    resolved = _resolve(full)
+    resolved.pop("title", None)
+    for p in resolved.get("properties", {}).values():
+        p.pop("title", None)
+    return json.dumps(resolved, indent=2, ensure_ascii=False)
 
 
 async def generate_structured(
