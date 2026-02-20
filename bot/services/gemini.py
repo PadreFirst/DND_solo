@@ -264,7 +264,18 @@ def _coerce_types(raw: dict, schema: type[BaseModel]) -> dict:
             continue
         val = raw[key]
         ann = str(field.annotation)
-        if "int" in ann and isinstance(val, str):
+        if "list" in ann and isinstance(val, str):
+            val = val.strip()
+            if val.startswith("["):
+                try:
+                    raw[key] = json.loads(val.replace("'", '"'))
+                except (json.JSONDecodeError, ValueError):
+                    raw[key] = [s.strip().strip("'\"") for s in val.strip("[]").split(",") if s.strip()]
+            elif val:
+                raw[key] = [s.strip() for s in val.split(",")]
+            else:
+                raw[key] = []
+        elif "int" in ann and isinstance(val, str):
             try:
                 raw[key] = int(float(val)) if val.replace(".", "").replace("-", "").isdigit() else 0
             except (ValueError, TypeError):
