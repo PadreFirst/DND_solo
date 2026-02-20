@@ -23,8 +23,7 @@ git reset --hard origin/master
 echo "[3/6] Installing dependencies..."
 pip install -r requirements.txt -q
 
-echo "[4/6] Removing old DB (fresh schema)..."
-rm -f "$DB_FILE"
+echo "[4/6] Database will auto-migrate on startup (no data loss)..."
 
 echo "[5/6] Starting bot..."
 systemctl start "$SERVICE"
