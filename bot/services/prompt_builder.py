@@ -67,6 +67,12 @@ def mission_prompt(
     )
 
 
+def game_turn_prompt(context: str, player_action: str, language: str = "en") -> str:
+    tpl = _load("game_turn.txt")
+    return tpl.format(context=context, player_action=player_action, language=language)
+
+
+# Legacy — kept for backward compat but no longer used in main loop
 def pass1_prompt(context: str, player_action: str, language: str = "en") -> str:
     tpl = _load("pass1_mechanics.txt")
     return tpl.format(context=context, player_action=player_action, language=language)

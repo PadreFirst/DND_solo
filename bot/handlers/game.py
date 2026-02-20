@@ -1,6 +1,7 @@
-"""Main gameplay loop: player action -> Pass 1 (mechanics) -> engine -> Pass 2 (narrative)."""
+"""Main gameplay loop: single-pass — one Gemini call per turn."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -13,10 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models.user import OnboardingState
 from bot.services import game_engine as engine
-from bot.services.gemini import GeminiError, MechanicsDecision, generate_narrative, generate_structured
+from bot.services.gemini import GeminiError, GameResponse, generate_narrative, generate_structured
 from bot.services.memory import build_context, maybe_summarize, save_episodic_memory
 from bot.services.personalization import maybe_run_deep_analysis, track_action_choice, track_interaction
-from bot.services.prompt_builder import pass1_prompt, pass2_prompt, system_prompt
+from bot.services.prompt_builder import game_turn_prompt, system_prompt
 from bot.services.user_service import ensure_character, ensure_session, get_or_create_user, reset_game
 from bot.utils.formatters import (
     format_character_sheet,
@@ -238,7 +239,21 @@ async def on_game_text(message: Message, db: AsyncSession) -> None:
                                   message.text.strip(), db)
 
 
-# ---- Core game loop ----
+# ---- Core game loop (single-pass) ----
+
+async def _keep_typing(bot, chat_id: int, stop_event: asyncio.Event) -> None:
+    """Send typing indicator every 4 seconds until stop_event is set."""
+    while not stop_event.is_set():
+        try:
+            await bot.send_chat_action(chat_id, ChatAction.TYPING)
+        except Exception:
+            pass
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=4)
+            return
+        except asyncio.TimeoutError:
+            pass
+
 
 async def _process_player_action(
     reply_target: Message, telegram_id: int, username: str | None,
@@ -260,29 +275,46 @@ async def _process_player_action(
     context = await build_context(user, char, gs, db)
     full_context = f"{sys_prompt}\n\n{context}"
 
-    # --- Pass 1 ---
+    # Start typing indicator in background
+    stop_typing = asyncio.Event()
+    typing_task = asyncio.create_task(
+        _keep_typing(reply_target.bot, reply_target.chat.id, stop_typing)
+    )
+
+    # --- Single Gemini call ---
     try:
-        decision: MechanicsDecision = await generate_structured(
-            pass1_prompt(full_context, player_action, language=user.language),
-            MechanicsDecision, content_tier=user.content_tier.value,
+        decision: GameResponse = await generate_structured(
+            game_turn_prompt(full_context, player_action, language=user.language),
+            GameResponse, content_tier=user.content_tier.value,
         )
     except Exception as e:
-        log.exception("Pass 1 failed")
+        stop_typing.set()
+        await typing_task
+        log.exception("Game turn failed")
         err_text = e.user_message(user.language) if isinstance(e, GeminiError) else t("ERROR", user.language)
         err_text += "\n\n<i>" + ("Прогресс сохранён." if user.language == "ru" else "Progress saved.") + "</i>"
         await reply_target.answer(err_text, parse_mode="HTML")
         return
 
+    stop_typing.set()
+    await typing_task
+
     # --- Execute mechanics ---
     mechanics_lines: list[str] = []
 
     for sc in decision.skill_checks:
-        r = engine.skill_check(char, sc.skill, sc.dc, sc.advantage, sc.disadvantage)
-        mechanics_lines.append(r.display)
+        try:
+            r = engine.skill_check(char, sc.skill, sc.dc, sc.advantage, sc.disadvantage)
+            mechanics_lines.append(r.display)
+        except Exception:
+            log.warning("Skill check failed: %s", sc.skill)
 
     for st in decision.saving_throws:
-        r = engine.saving_throw(char, st.ability, st.dc, st.advantage, st.disadvantage)
-        mechanics_lines.append(r.display)
+        try:
+            r = engine.saving_throw(char, st.ability, st.dc, st.advantage, st.disadvantage)
+            mechanics_lines.append(r.display)
+        except Exception:
+            log.warning("Saving throw failed: %s", st.ability)
 
     if decision.attack_target_ac and decision.attack_target_ac > 0:
         try:
@@ -301,7 +333,7 @@ async def _process_player_action(
                 status = engine.apply_damage(char, dmg.total)
                 mechanics_lines.append(f"{npc.name}: {dmg.display} → {status}")
             except Exception:
-                log.warning("Failed to roll NPC damage dice: %s", npc.damage_dice)
+                log.warning("NPC damage failed: %s", npc.damage_dice)
 
     for sc in decision.stat_changes:
         if sc.stat == "current_hp" and sc.delta < 0:
@@ -339,19 +371,8 @@ async def _process_player_action(
     if decision.is_combat_end:
         gs.in_combat = False
 
-    mechanics_text = "\n".join(mechanics_lines) if mechanics_lines else "No mechanical effects."
-
-    # --- Pass 2 ---
-    try:
-        narrative = await generate_narrative(
-            pass2_prompt(full_context, player_action, mechanics_text, user.language),
-            content_tier=user.content_tier.value,
-        )
-    except Exception:
-        log.exception("Pass 2 failed")
-        narrative = decision.narration_context or "..."
-
-    narrative = md_to_html(narrative)
+    # --- Build response ---
+    narrative = md_to_html(decision.narrative) if decision.narrative else "..."
     gs.append_message("assistant", narrative)
 
     try:
@@ -362,7 +383,6 @@ async def _process_player_action(
     except Exception:
         log.exception("Post-turn processing failed (non-fatal)")
 
-    # --- Response ---
     parts: list[str] = []
     if mechanics_lines:
         parts.append(f"<blockquote>{chr(10).join(mechanics_lines)}</blockquote>")

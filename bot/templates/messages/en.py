@@ -57,7 +57,13 @@ CHAR_EXTRA = (
 CHAR_GENERATING = "⏳ Creating character... (≈{wait}s)"
 CHAR_REVIEW = "📋 <b>Character ready!</b>\n\n{sheet}\n\n📖 <b>Backstory:</b>\n{backstory}"
 MISSION_GENERATING = "🌍 Generating your starting mission... (≈{wait}s)"
-GAME_START = "🎮 <b>The adventure begins!</b>\n\n{opening_scene}"
+GAME_START = (
+    "🎮 <b>The adventure begins!</b>\n\n"
+    "{opening_scene}\n\n"
+    "─────────────\n"
+    "💡 <i>Tap a button below or type your own action — "
+    "any text is accepted. 'Menu' for in-game commands.</i>"
+)
 
 LEVEL_UP = "🎉 <b>LEVEL UP!</b>\n\n{name} → Lv.{level}\nHP: {old_hp} → {new_hp} | Proficiency: +{prof}"
 DEATH = "💀 <b>{name} has fallen...</b>\n\nDarkness envelops you...\n\n/start — new adventure"

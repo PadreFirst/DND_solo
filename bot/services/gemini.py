@@ -143,10 +143,10 @@ class NPCAction(BaseModel):
     damage_dice: str | None = ""
 
 
-class MechanicsDecision(BaseModel):
+class GameResponse(BaseModel):
     model_config = ConfigDict(coerce_numbers_to_str=True)
 
-    narration_context: str = ""
+    narrative: str = Field(default="", description="The story text describing what happens. 150-400 words. HTML tags only.")
     skill_checks: list[SkillCheckRequest] = Field(default_factory=list)
     saving_throws: list[SavingThrowRequest] = Field(default_factory=list)
     attack_target_ac: int = 0
@@ -163,6 +163,9 @@ class MechanicsDecision(BaseModel):
     is_combat_start: bool = False
     is_combat_end: bool = False
     important_event: str = ""
+
+
+MechanicsDecision = GameResponse
 
 
 class CharacterProposal(BaseModel):
