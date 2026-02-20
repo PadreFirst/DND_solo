@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models.user import AgeGroup, OnboardingState, User
 from bot.services.character_gen import apply_proposal, generate_character
-from bot.services.gemini import MissionProposal, generate_structured
+from bot.services.gemini import GeminiError, MissionProposal, generate_structured
 from bot.services.prompt_builder import mission_prompt
 from bot.services.user_service import ensure_character, ensure_session, get_or_create_user, reset_game
 from bot.utils.formatters import format_character_sheet, truncate_for_telegram
@@ -48,9 +48,22 @@ WORLD_PRESETS = {
 
 async def _typing(event: Message | CallbackQuery) -> None:
     chat_id = event.chat.id if isinstance(event, Message) else event.message.chat.id
-    from aiogram import Bot
-    bot: Bot = event.bot if isinstance(event, Message) else event.message.bot
+    bot = event.bot if isinstance(event, Message) else event.message.bot
     await bot.send_chat_action(chat_id, ChatAction.TYPING)
+
+
+async def _send_error(event: Message | CallbackQuery, user: User, error: Exception) -> None:
+    """Send a meaningful error to the user without losing progress."""
+    if isinstance(error, GeminiError):
+        text = error.user_message(user.language)
+    else:
+        text = t("ERROR", user.language)
+    text += "\n\n" + (_retry_hint_ru if user.language == "ru" else _retry_hint_en)
+    target = event if isinstance(event, Message) else event.message
+    await target.answer(text, parse_mode="HTML")
+
+_retry_hint_ru = "<i>Прогресс сохранён. Просто повтори последнее действие или отправь любое сообщение.</i>"
+_retry_hint_en = "<i>Progress saved. Just repeat your last action or send any message.</i>"
 
 
 # ---- /start ----
@@ -158,7 +171,7 @@ async def on_char_review(cb: CallbackQuery, db: AsyncSession) -> None:
             theme="adventure", language=user.language,
         )
         mission: MissionProposal = await generate_structured(
-            prompt, MissionProposal, content_tier=user.content_tier.value
+            prompt, MissionProposal, content_tier=user.content_tier.value, heavy=True,
         )
 
         gs.current_quest = f"{mission.quest_title}: {mission.quest_description}"
@@ -177,9 +190,16 @@ async def on_char_review(cb: CallbackQuery, db: AsyncSession) -> None:
             parse_mode="HTML",
             reply_markup=actions_keyboard(actions, user.language),
         )
-    except Exception:
+    except Exception as e:
         log.exception("Mission generation failed")
-        await cb.message.answer(t("ERROR", user.language), parse_mode="HTML")
+        user.onboarding_state = OnboardingState.CHAR_REVIEW
+        sheet = format_character_sheet(char)
+        await cb.message.answer(
+            t("CHAR_REVIEW", user.language, sheet=sheet, backstory=char.backstory),
+            parse_mode="HTML",
+            reply_markup=character_review_keyboard(user.language),
+        )
+        await _send_error(cb, user, e)
 
 
 # ---- Text input during onboarding (called from game.py) ----
@@ -275,6 +295,7 @@ def _upsert_answers(world_state: str, key: str, value: str) -> str:
 async def _generate_char(message: Message, user: User, description: str, db: AsyncSession) -> None:
     char = await ensure_character(user, db)
     gs = await ensure_session(user, db)
+    prev_state = user.onboarding_state
     user.onboarding_state = OnboardingState.CHAR_GENERATING
     await message.answer(t("CHAR_GENERATING", user.language), parse_mode="HTML")
 
@@ -296,10 +317,10 @@ async def _generate_char(message: Message, user: User, description: str, db: Asy
             parse_mode="HTML",
             reply_markup=character_review_keyboard(user.language),
         )
-    except Exception:
+    except Exception as e:
         log.exception("Character generation failed")
-        user.onboarding_state = OnboardingState.CHAR_FREE_DESC
-        await message.answer(t("ERROR", user.language), parse_mode="HTML")
+        user.onboarding_state = prev_state
+        await _send_error(message, user, e)
 
 
 def _default_actions(lang: str) -> list[str]:

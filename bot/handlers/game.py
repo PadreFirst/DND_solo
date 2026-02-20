@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models.user import OnboardingState
 from bot.services import game_engine as engine
-from bot.services.gemini import MechanicsDecision, generate_narrative, generate_structured
+from bot.services.gemini import GeminiError, MechanicsDecision, generate_narrative, generate_structured
 from bot.services.memory import build_context, maybe_summarize, save_episodic_memory
 from bot.services.personalization import maybe_run_deep_analysis, track_action_choice, track_interaction
 from bot.services.prompt_builder import pass1_prompt, pass2_prompt, system_prompt
@@ -24,6 +24,7 @@ from bot.utils.formatters import (
     format_quest,
     truncate_for_telegram,
 )
+from bot.utils.i18n import t
 from bot.utils.keyboards import actions_keyboard, game_menu_keyboard, inventory_list_keyboard
 
 log = logging.getLogger(__name__)
@@ -121,7 +122,6 @@ async def on_game_menu(cb: CallbackQuery, db: AsyncSession) -> None:
 
     if action == "location":
         gs = await ensure_session(user, db)
-        from bot.utils.i18n import t
         await cb.message.answer(
             t("LOCATION_INFO", user.language, location=gs.current_location), parse_mode="HTML"
         )
@@ -135,7 +135,6 @@ async def on_game_menu(cb: CallbackQuery, db: AsyncSession) -> None:
         return
 
     if action == "help":
-        from bot.utils.i18n import t
         await cb.message.answer(t("MENU_HELP", user.language), parse_mode="HTML")
         await cb.answer()
         return
@@ -200,10 +199,11 @@ async def _process_player_action(
             pass1_prompt(full_context, player_action),
             MechanicsDecision, content_tier=user.content_tier.value,
         )
-    except Exception:
+    except Exception as e:
         log.exception("Pass 1 failed")
-        from bot.utils.i18n import t
-        await reply_target.answer(t("ERROR", user.language), parse_mode="HTML")
+        err_text = e.user_message(user.language) if isinstance(e, GeminiError) else t("ERROR", user.language)
+        err_text += "\n\n<i>" + ("Прогресс сохранён." if user.language == "ru" else "Progress saved.") + "</i>"
+        await reply_target.answer(err_text, parse_mode="HTML")
         return
 
     # --- Execute mechanics ---
@@ -291,11 +291,9 @@ async def _process_player_action(
     parts.append(narrative)
 
     if leveled_up:
-        from bot.utils.i18n import t
         parts.append(t("LEVEL_UP", user.language, name=char.name, level=str(char.level),
                         old_hp=str(old_hp), new_hp=str(char.max_hp), prof=str(char.proficiency_bonus)))
     if char.current_hp <= 0:
-        from bot.utils.i18n import t
         parts.append(t("DEATH", user.language, name=char.name))
 
     elapsed = int((time.monotonic() - start_time) * 1000)

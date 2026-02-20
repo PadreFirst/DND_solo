@@ -1,60 +1,117 @@
-# DnD Telegram Bot — AI Game Master
+# DnD Solo — AI Game Master Telegram Bot
 
-AI-powered solo DnD 5e (2024 Revised) adventure bot for Telegram, running on Gemini 3 Flash.
+Telegram-бот для одиночных DnD-приключений с AI Game Master на базе Google Gemini.
 
-## Quick Start
+## Возможности
 
-1. **Create a Telegram bot** via [@BotFather](https://t.me/BotFather) and get the token.
+- **AI Game Master** — двухпроходная архитектура: Gemini решает механику (JSON), Python считает кубики, Gemini пишет нарратив
+- **DnD 5.5e** — полное соответствие правилам: броски, навыки, XP, инвентарь, уровни, AC, спасброски
+- **Генерация персонажа** — свободное описание или 5 вопросов + AI создаёт карточку с правильными статами
+- **Генерация мира** — пресеты (фэнтези, хоррор, киберпанк...) или своё описание
+- **Адаптивная персонализация** — бот анализирует стиль игры и подстраивает контент
+- **Без цензуры** (18+) — полный контент для взрослых, модерация для подростков
+- **Typing indicator** — бот показывает «печатает...» во время генерации
+- **Inline-кнопки** — варианты действий, игровое меню, управление инвентарём
+- **Многоязычность** — русский, английский (расширяемо)
 
-2. **Get a Gemini API key** from [Google AI Studio](https://aistudio.google.com/apikey).
+## Архитектура
 
-3. **Set up environment:**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your tokens
-   ```
+```
+Telegram → aiogram 3 → Handlers
+                          ├── Pass 1: Gemini → MechanicsDecision (JSON)
+                          ├── Game Engine: Python (dice, damage, XP)
+                          └── Pass 2: Gemini → Narrative text
+                       
+SQLite (dev) / PostgreSQL (prod) — единственный источник правды
+```
 
-4. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+## Настройка
 
-5. **Run:**
-   ```bash
-   python -m bot.main
-   ```
+### 1. Клонировать
 
-The bot starts in polling mode — no webhook or tunnel needed for development.
+```bash
+git clone https://github.com/PadreFirst/DND_solo.git
+cd DND_solo
+```
 
-## Architecture
+### 2. Создать `.env`
 
-Two-pass Gemini architecture to prevent hallucinations:
+```
+BOT_TOKEN=your_telegram_bot_token
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-2.0-flash
+GEMINI_MODEL_HEAVY=
+GEMINI_PROXY=
+DATABASE_URL=sqlite+aiosqlite:///./dnd_bot.db
+DEBUG=true
+```
 
-- **Pass 1 (Structured JSON):** Gemini analyzes the player's action and decides what game mechanics apply (skill checks, attacks, damage, inventory changes, etc.)
-- **Game Engine:** Code rolls all dice, calculates damage, applies DnD rules deterministically.
-- **Pass 2 (Narrative):** Gemini receives the mechanical results and writes an immersive story.
+| Переменная | Описание |
+|---|---|
+| `BOT_TOKEN` | Токен Telegram-бота от @BotFather |
+| `GEMINI_API_KEY` | API-ключ Google AI Studio |
+| `GEMINI_MODEL` | Модель для игрового процесса (default: `gemini-2.0-flash`) |
+| `GEMINI_MODEL_HEAVY` | Модель для создания мира/персонажа (опционально, например `gemini-2.5-pro-preview-05-06`) |
+| `GEMINI_PROXY` | HTTP/SOCKS5 прокси для Gemini API (если нужен) |
 
-The database is the single source of truth for all game state (HP, inventory, XP, etc.) — the AI reads state from DB every turn and never relies on its own "memory" for numbers.
+### 3. Установить и запустить
 
-## Commands
+```bash
+python -m venv venv
+venv\Scripts\activate      # Windows
+# source venv/bin/activate  # Linux/Mac
+pip install -r requirements.txt
+python -m bot.main
+```
 
-- `/start` — Begin a new adventure (onboarding flow)
-- `/stats` — View character sheet
-- `/inventory` — Manage inventory
-- `/quest` — View current quest
-- `/debug` — Show full game state JSON (dev mode)
+## Деплой на сервер
 
-## Project Structure
+```bash
+ssh root@your-server "bash -s" < deploy.sh
+```
+
+Скрипт автоматически: остановит бот → обновит код → установит зависимости → пересоздаст БД → запустит → проверит версию.
+
+## Прокси для Gemini API
+
+Если сервер в регионе, где Gemini API недоступен:
+
+```
+GEMINI_PROXY=http://user:pass@proxy-host:port
+# или
+GEMINI_PROXY=socks5://user:pass@proxy-host:port
+```
+
+## Структура проекта
 
 ```
 bot/
-  main.py              — Entry point
-  config.py            — Settings from .env
-  handlers/            — Telegram message/callback handlers
-  services/            — Business logic (Gemini, game engine, memory, personalization)
-  models/              — SQLAlchemy ORM models
-  db/                  — Database engine
-  templates/prompts/   — Prompt templates for Gemini
-  templates/messages/  — Multilingual UI text
-  utils/               — Dice roller, formatters, keyboards
+├── config.py              # Настройки из .env
+├── main.py                # Точка входа
+├── models/                # SQLAlchemy модели (User, Character, GameSession, Memory)
+├── handlers/
+│   ├── start.py           # Онбординг: язык → возраст → мир → персонаж → миссия
+│   ├── game.py            # Игровой цикл: Pass 1 → Engine → Pass 2
+│   └── inventory.py       # Управление инвентарём
+├── services/
+│   ├── gemini.py          # Gemini API: structured + narrative + proxy
+│   ├── game_engine.py     # Детерминированная механика DnD
+│   ├── character_gen.py   # Генерация персонажа
+│   ├── memory.py          # Контекст и суммаризация
+│   ├── personalization.py # Адаптивные предпочтения
+│   └── prompt_builder.py  # Шаблоны промптов
+├── templates/
+│   ├── messages/           # i18n строки (ru.py, en.py)
+│   └── prompts/            # Промпт-шаблоны для Gemini
+├── utils/
+│   ├── dice.py            # Криптографический рандом
+│   ├── formatters.py      # Форматирование для Telegram
+│   ├── i18n.py            # Мультиязычность
+│   └── keyboards.py       # Inline-клавиатуры
+└── middlewares/
+    └── db_session.py      # DB-сессия на каждый хендлер
 ```
+
+## Лицензия
+
+MIT

@@ -2,6 +2,8 @@
 
 Pass 1: structured JSON — decides WHAT mechanics apply.
 Pass 2: narrative text  — describes WHAT happened, beautifully.
+
+Supports proxy for geo-restricted regions and separate heavy model for creation tasks.
 """
 from __future__ import annotations
 
@@ -9,6 +11,7 @@ import json
 import logging
 from typing import Any
 
+import httpx
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
@@ -17,7 +20,26 @@ from bot.config import settings
 
 log = logging.getLogger(__name__)
 
-client = genai.Client(api_key=settings.gemini_api_key)
+
+def _build_client() -> genai.Client:
+    kwargs: dict[str, Any] = {"api_key": settings.gemini_api_key}
+
+    if settings.gemini_proxy:
+        proxy = settings.gemini_proxy
+        log.info("Gemini using proxy: %s", proxy[:30] + "...")
+        kwargs["http_options"] = types.HttpOptions(
+            client_args={
+                "transport": httpx.HTTPTransport(proxy=proxy),
+            },
+            async_client_args={
+                "transport": httpx.AsyncHTTPTransport(proxy=proxy),
+            },
+        )
+
+    return genai.Client(**kwargs)
+
+
+client = _build_client()
 
 SAFETY_OFF = [
     types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="OFF"),
@@ -152,45 +174,100 @@ def _get_safety(content_tier: str) -> list[types.SafetySetting]:
     return SAFETY_MODERATE
 
 
+def _pick_model(heavy: bool = False) -> str:
+    if heavy and settings.gemini_model_heavy:
+        return settings.gemini_model_heavy
+    return settings.gemini_model
+
+
+class GeminiError(Exception):
+    """Wraps Gemini API errors with user-friendly context."""
+
+    def __init__(self, operation: str, original: Exception):
+        self.operation = operation
+        self.original = original
+        super().__init__(f"Gemini [{operation}]: {original}")
+
+    @property
+    def user_message_ru(self) -> str:
+        s = str(self.original)
+        if "location is not supported" in s:
+            return "⚠️ API недоступен из этого региона. Нужна прокси (GEMINI_PROXY в .env)."
+        if "RESOURCE_EXHAUSTED" in s or "429" in s:
+            return "⚠️ Лимит запросов. Подожди минуту и попробуй снова."
+        if "API key" in s or "401" in s:
+            return "⚠️ Неверный API-ключ Gemini."
+        if "not found" in s.lower() or "404" in s:
+            return f"⚠️ Модель {_pick_model()} не найдена. Проверь GEMINI_MODEL в .env."
+        return f"⚠️ Ошибка AI: {s[:200]}"
+
+    @property
+    def user_message_en(self) -> str:
+        s = str(self.original)
+        if "location is not supported" in s:
+            return "⚠️ API not available from this region. Set GEMINI_PROXY in .env."
+        if "RESOURCE_EXHAUSTED" in s or "429" in s:
+            return "⚠️ Rate limited. Wait a minute and try again."
+        if "API key" in s or "401" in s:
+            return "⚠️ Invalid Gemini API key."
+        if "not found" in s.lower() or "404" in s:
+            return f"⚠️ Model {_pick_model()} not found. Check GEMINI_MODEL in .env."
+        return f"⚠️ AI error: {s[:200]}"
+
+    def user_message(self, lang: str) -> str:
+        return self.user_message_ru if lang == "ru" else self.user_message_en
+
+
 async def generate_structured(
     prompt: str,
     schema: type[BaseModel],
     content_tier: str = "full",
+    heavy: bool = False,
 ) -> BaseModel:
-    log.debug("Gemini structured request (%s):\n%s", schema.__name__, prompt[:500])
-    response = await client.aio.models.generate_content(
-        model=settings.gemini_model,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=schema,
-            safety_settings=_get_safety(content_tier),
-            temperature=0.8,
-        ),
-    )
-    text = response.text
-    log.debug("Gemini structured response:\n%s", text[:1000])
-    data = json.loads(text)
-    return schema.model_validate(data)
+    model = _pick_model(heavy)
+    log.debug("Gemini structured [%s] (%s):\n%s", model, schema.__name__, prompt[:500])
+    try:
+        response = await client.aio.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=schema,
+                safety_settings=_get_safety(content_tier),
+                temperature=0.8,
+            ),
+        )
+        text = response.text
+        log.debug("Gemini structured response:\n%s", text[:1000])
+        data = json.loads(text)
+        return schema.model_validate(data)
+    except Exception as e:
+        log.exception("Gemini structured generation failed [%s]", model)
+        raise GeminiError(f"structured/{schema.__name__}", e) from e
 
 
 async def generate_narrative(
     prompt: str,
     content_tier: str = "full",
 ) -> str:
-    log.debug("Gemini narrative request:\n%s", prompt[:500])
-    response = await client.aio.models.generate_content(
-        model=settings.gemini_model,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            safety_settings=_get_safety(content_tier),
-            temperature=1.0,
-            max_output_tokens=2048,
-        ),
-    )
-    text = response.text
-    log.debug("Gemini narrative response:\n%s", text[:1000])
-    return text
+    model = _pick_model(heavy=False)
+    log.debug("Gemini narrative [%s]:\n%s", model, prompt[:500])
+    try:
+        response = await client.aio.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                safety_settings=_get_safety(content_tier),
+                temperature=1.0,
+                max_output_tokens=2048,
+            ),
+        )
+        text = response.text
+        log.debug("Gemini narrative response:\n%s", text[:1000])
+        return text
+    except Exception as e:
+        log.exception("Gemini narrative generation failed")
+        raise GeminiError("narrative", e) from e
 
 
 async def generate_text(
@@ -199,13 +276,17 @@ async def generate_text(
     temperature: float = 0.9,
     max_tokens: int = 4096,
 ) -> str:
-    response = await client.aio.models.generate_content(
-        model=settings.gemini_model,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            safety_settings=_get_safety(content_tier),
-            temperature=temperature,
-            max_output_tokens=max_tokens,
-        ),
-    )
-    return response.text
+    try:
+        response = await client.aio.models.generate_content(
+            model=_pick_model(heavy=False),
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                safety_settings=_get_safety(content_tier),
+                temperature=temperature,
+                max_output_tokens=max_tokens,
+            ),
+        )
+        return response.text
+    except Exception as e:
+        log.exception("Gemini text generation failed")
+        raise GeminiError("text", e) from e

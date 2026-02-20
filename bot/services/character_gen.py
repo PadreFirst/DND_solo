@@ -29,7 +29,7 @@ async def generate_character(
         language=language,
     )
     proposal: CharacterProposal = await generate_structured(
-        prompt, CharacterProposal, content_tier=content_tier,
+        prompt, CharacterProposal, content_tier=content_tier, heavy=True,
     )
     return proposal
 
