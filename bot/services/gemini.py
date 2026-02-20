@@ -3,15 +3,16 @@
 Pass 1: structured JSON — decides WHAT mechanics apply.
 Pass 2: narrative text  — describes WHAT happened, beautifully.
 
-Supports proxy for geo-restricted regions and separate heavy model for creation tasks.
+Uses prompt-based JSON extraction (like the working Boss bot) instead of
+response_schema which is geo-restricted in some regions.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
 
-import httpx
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
@@ -20,40 +21,20 @@ from bot.config import settings
 
 log = logging.getLogger(__name__)
 
+_LLM_TIMEOUT = 90
 
-def _build_client() -> genai.Client:
-    kwargs: dict[str, Any] = {"api_key": settings.gemini_api_key}
-
-    if settings.gemini_proxy:
-        proxy = settings.gemini_proxy
-        log.info("Gemini using proxy: %s", proxy[:30] + "...")
-        kwargs["http_options"] = types.HttpOptions(
-            client_args={
-                "transport": httpx.HTTPTransport(proxy=proxy),
-            },
-            async_client_args={
-                "transport": httpx.AsyncHTTPTransport(proxy=proxy),
-            },
+_http_options_kwargs: dict[str, Any] = {}
+if settings.gemini_proxy:
+    import httpx
+    log.info("Gemini using proxy: %s", settings.gemini_proxy[:30] + "...")
+    _http_options_kwargs = {
+        "http_options": types.HttpOptions(
+            client_args={"transport": httpx.HTTPTransport(proxy=settings.gemini_proxy)},
+            async_client_args={"transport": httpx.AsyncHTTPTransport(proxy=settings.gemini_proxy)},
         )
+    }
 
-    return genai.Client(**kwargs)
-
-
-client = _build_client()
-
-SAFETY_OFF = [
-    types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="OFF"),
-    types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="OFF"),
-    types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="OFF"),
-    types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="OFF"),
-]
-
-SAFETY_MODERATE = [
-    types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_MEDIUM_AND_ABOVE"),
-    types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_MEDIUM_AND_ABOVE"),
-    types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_MEDIUM_AND_ABOVE"),
-    types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_MEDIUM_AND_ABOVE"),
-]
+client = genai.Client(api_key=settings.gemini_api_key, **_http_options_kwargs)
 
 
 # --- Pydantic schemas for structured output ---
@@ -168,16 +149,44 @@ class PersonalizationAnalysis(BaseModel):
     reasoning: str = ""
 
 
-def _get_safety(content_tier: str) -> list[types.SafetySetting]:
-    if content_tier == "full":
-        return SAFETY_OFF
-    return SAFETY_MODERATE
-
-
 def _pick_model(heavy: bool = False) -> str:
     if heavy and settings.gemini_model_heavy:
         return settings.gemini_model_heavy
     return settings.gemini_model
+
+
+def _schema_to_prompt_hint(schema: type[BaseModel]) -> str:
+    """Generate a JSON schema description for the prompt instead of using response_schema."""
+    schema_json = schema.model_json_schema()
+
+    def _simplify(s: dict) -> dict:
+        out: dict[str, Any] = {}
+        props = s.get("properties", {})
+        defs = s.get("$defs", {})
+        for name, prop in props.items():
+            ref = prop.get("$ref")
+            if ref:
+                ref_name = ref.split("/")[-1]
+                out[name] = _simplify(defs.get(ref_name, {}))
+                continue
+            items = prop.get("items", {})
+            if items and items.get("$ref"):
+                ref_name = items["$ref"].split("/")[-1]
+                out[name] = [_simplify(defs.get(ref_name, {}))]
+                continue
+            t = prop.get("type", "string")
+            default = prop.get("default")
+            desc = prop.get("description", "")
+            hint = t
+            if desc:
+                hint = f"{t} — {desc}"
+            if default is not None and default != "" and default != []:
+                hint += f" (default: {default})"
+            out[name] = hint
+        return out
+
+    simplified = _simplify(schema_json)
+    return json.dumps(simplified, indent=2, ensure_ascii=False)
 
 
 class GeminiError(Exception):
@@ -198,7 +207,7 @@ class GeminiError(Exception):
         if "API key" in s or "401" in s:
             return "⚠️ Неверный API-ключ Gemini."
         if "not found" in s.lower() or "404" in s:
-            return f"⚠️ Модель {_pick_model()} не найдена. Проверь GEMINI_MODEL в .env."
+            return f"⚠️ Модель не найдена. Проверь GEMINI_MODEL в .env."
         return f"⚠️ Ошибка AI: {s[:200]}"
 
     @property
@@ -211,7 +220,7 @@ class GeminiError(Exception):
         if "API key" in s or "401" in s:
             return "⚠️ Invalid Gemini API key."
         if "not found" in s.lower() or "404" in s:
-            return f"⚠️ Model {_pick_model()} not found. Check GEMINI_MODEL in .env."
+            return f"⚠️ Model not found. Check GEMINI_MODEL in .env."
         return f"⚠️ AI error: {s[:200]}"
 
     def user_message(self, lang: str) -> str:
@@ -224,23 +233,39 @@ async def generate_structured(
     content_tier: str = "full",
     heavy: bool = False,
 ) -> BaseModel:
+    """Generate structured JSON using prompt-based schema (no response_schema, works globally)."""
     model = _pick_model(heavy)
-    log.debug("Gemini structured [%s] (%s):\n%s", model, schema.__name__, prompt[:500])
+    schema_hint = _schema_to_prompt_hint(schema)
+    full_prompt = (
+        f"{prompt}\n\n"
+        f"RESPOND WITH ONLY VALID JSON matching this exact structure:\n"
+        f"{schema_hint}\n\n"
+        f"Output ONLY the JSON object, no markdown, no explanation."
+    )
+    log.debug("Gemini structured [%s] (%s):\n%s", model, schema.__name__, full_prompt[:500])
     try:
-        response = await client.aio.models.generate_content(
-            model=model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=schema,
-                safety_settings=_get_safety(content_tier),
-                temperature=0.8,
+        response = await asyncio.wait_for(
+            client.aio.models.generate_content(
+                model=model,
+                contents=full_prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.8,
+                    max_output_tokens=4096,
+                ),
             ),
+            timeout=_LLM_TIMEOUT,
         )
         text = response.text
         log.debug("Gemini structured response:\n%s", text[:1000])
         data = json.loads(text)
         return schema.model_validate(data)
+    except asyncio.TimeoutError as e:
+        log.error("Gemini structured timeout after %ss", _LLM_TIMEOUT)
+        raise GeminiError(f"structured/{schema.__name__}", e) from e
+    except json.JSONDecodeError as e:
+        log.error("Gemini returned invalid JSON: %s", e)
+        raise GeminiError(f"structured/{schema.__name__}", e) from e
     except Exception as e:
         log.exception("Gemini structured generation failed [%s]", model)
         raise GeminiError(f"structured/{schema.__name__}", e) from e
@@ -253,18 +278,23 @@ async def generate_narrative(
     model = _pick_model(heavy=False)
     log.debug("Gemini narrative [%s]:\n%s", model, prompt[:500])
     try:
-        response = await client.aio.models.generate_content(
-            model=model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                safety_settings=_get_safety(content_tier),
-                temperature=1.0,
-                max_output_tokens=2048,
+        response = await asyncio.wait_for(
+            client.aio.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=1.0,
+                    max_output_tokens=2048,
+                ),
             ),
+            timeout=_LLM_TIMEOUT,
         )
         text = response.text
         log.debug("Gemini narrative response:\n%s", text[:1000])
         return text
+    except asyncio.TimeoutError as e:
+        log.error("Gemini narrative timeout")
+        raise GeminiError("narrative", e) from e
     except Exception as e:
         log.exception("Gemini narrative generation failed")
         raise GeminiError("narrative", e) from e
@@ -277,16 +307,21 @@ async def generate_text(
     max_tokens: int = 4096,
 ) -> str:
     try:
-        response = await client.aio.models.generate_content(
-            model=_pick_model(heavy=False),
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                safety_settings=_get_safety(content_tier),
-                temperature=temperature,
-                max_output_tokens=max_tokens,
+        response = await asyncio.wait_for(
+            client.aio.models.generate_content(
+                model=_pick_model(heavy=False),
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=temperature,
+                    max_output_tokens=max_tokens,
+                ),
             ),
+            timeout=_LLM_TIMEOUT,
         )
         return response.text
+    except asyncio.TimeoutError as e:
+        log.error("Gemini text timeout")
+        raise GeminiError("text", e) from e
     except Exception as e:
         log.exception("Gemini text generation failed")
         raise GeminiError("text", e) from e
