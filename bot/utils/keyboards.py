@@ -146,11 +146,21 @@ def character_review_keyboard(lang: str) -> InlineKeyboardMarkup:
     ]])
 
 
+def _trim_callback(prefix: str, text: str) -> str:
+    """Trim text so prefix+text fits in 64 bytes (Telegram callback_data limit)."""
+    budget = 64 - len(prefix.encode("utf-8"))
+    encoded = text.encode("utf-8")
+    if len(encoded) <= budget:
+        return prefix + text
+    trimmed = encoded[:budget].decode("utf-8", errors="ignore")
+    return prefix + trimmed
+
+
 def actions_keyboard(actions: list[str], lang: str = "en") -> InlineKeyboardMarkup:
     buttons = []
     for action in actions[:5]:
         buttons.append([InlineKeyboardButton(
-            text=action, callback_data=f"act:{action[:60]}",
+            text=action, callback_data=_trim_callback("act:", action),
         )])
     menu_label = "📋 Меню" if lang == "ru" else "📋 Menu"
     buttons.append([InlineKeyboardButton(text=menu_label, callback_data="gamemenu:open")])

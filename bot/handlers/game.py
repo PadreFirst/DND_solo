@@ -398,8 +398,22 @@ async def _process_player_action(
     log.info("Turn %d user %d: %dms", gs.turn_number, user.telegram_id, elapsed)
 
     final_actions = decision.available_actions if decision.available_actions else _default_actions(user.language)
-    await reply_target.answer(
-        truncate_for_telegram("\n\n".join(parts)),
-        parse_mode="HTML",
-        reply_markup=actions_keyboard(final_actions, user.language),
-    )
+    try:
+        await reply_target.answer(
+            truncate_for_telegram("\n\n".join(parts)),
+            parse_mode="HTML",
+            reply_markup=actions_keyboard(final_actions, user.language),
+        )
+    except Exception:
+        log.exception("Failed to send turn response, trying without buttons")
+        try:
+            await reply_target.answer(
+                truncate_for_telegram("\n\n".join(parts)),
+                parse_mode="HTML",
+                reply_markup=actions_keyboard(_default_actions(user.language), user.language),
+            )
+        except Exception:
+            log.exception("Failed to send even with default buttons")
+            await reply_target.answer(
+                truncate_for_telegram("\n\n".join(parts)),
+            )

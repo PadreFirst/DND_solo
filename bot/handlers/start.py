@@ -209,7 +209,7 @@ async def on_char_review(cb: CallbackQuery, db: AsyncSession) -> None:
         gs.append_message("assistant", opening)
         user.onboarding_state = OnboardingState.PLAYING
 
-        actions = _default_actions(user.language)
+        actions = mission.opening_actions if mission.opening_actions else _default_actions(user.language)
         await cb.message.answer(
             t("GAME_START", user.language, opening_scene=truncate_for_telegram(opening, 3500)),
             parse_mode="HTML",

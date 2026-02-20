@@ -12,20 +12,21 @@ WORLD SETTING:
 
 NARRATIVE TONE: {tone}
 
-CRITICAL RULES FOR THE MISSION:
-1. The mission MUST be consistent with the world setting. If the world has secrets the character doesn't know about, the mission should INTRODUCE them gradually — don't start as if the character already knows everything.
-2. Read the backstory carefully. The character's knowledge, skills, and social connections should be respected. Don't give them abilities or knowledge they don't have.
-3. The opening scene must match the TONE. If tone is dark/grim — atmosphere should be tense, threatening. If heroic — inspiring. If humorous — witty.
+CRITICAL RULES:
+1. The mission MUST respect WHAT THE CHARACTER KNOWS. If this is a new world for them, they should discover things gradually. They should be confused, curious, lost — NOT already briefed.
+2. DO NOT name NPCs in the opening_scene. Describe them by appearance only ("a tall figure in a dark coat", "the old woman behind the counter"). Their name goes ONLY in first_npc_name field — the player will learn it through dialogue during gameplay.
+3. The opening scene must match the TONE. Dark = tense, threatening. Heroic = inspiring. Humorous = witty.
+4. DO NOT invent game mechanics in the scene (no "transitions", "glue fields", "biometric scans" that would force dice rolls). Just tell a story.
 
 MISSION STRUCTURE:
-1. HOOK — A compelling reason to act RIGHT NOW. Personal stakes tied to the character's backstory.
-2. OPENING SCENE — Drop the player into action or intrigue immediately. The scene should feel like the character's normal world is about to change. Use all senses. NO clichés.
-3. FIRST NPC — Interesting character with name, personality, hidden agenda. Must fit the world.
+1. HOOK — A compelling reason to act RIGHT NOW. Personal stakes.
+2. OPENING SCENE — Drop the player into action or intrigue. Use all senses. 200-400 words. End with a moment that demands the player's decision.
+3. FIRST NPC — Interesting character (name in first_npc_name, NOT in the opening_scene text).
 4. MYSTERY — A deeper thread. Plant the first subtle clue.
-5. STARTING LOCATION — Vivid, specific to the world setting.
+5. STARTING LOCATION — Vivid, specific to the world.
 
-The opening_scene should be 200-400 words of immersive narrative. End with a moment that demands the player's decision.
+opening_actions: Provide 4-5 short actions (3-8 words each) in {language} that are SPECIFIC to the opening scene. They should represent genuinely different choices for this exact moment. NOT generic actions like "look around" or "check inventory".
 
-Use HTML tags for formatting: <b>bold</b> for emphasis, <i>italic</i> for thoughts/whispers. Do NOT use markdown ** formatting.
+Use HTML: <b>bold</b>, <i>italic</i>. NO markdown.
 
 Respond in {language}.

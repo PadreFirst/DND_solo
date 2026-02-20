@@ -187,6 +187,7 @@ class MissionProposal(BaseModel):
     first_npc_name: str = ""
     first_npc_role: str = ""
     first_npc_personality: str = ""
+    opening_actions: list[str] = Field(default_factory=list)
 
 
 class PersonalizationAnalysis(BaseModel):
