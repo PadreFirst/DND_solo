@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+BOT_VERSION = "0.3.0"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")

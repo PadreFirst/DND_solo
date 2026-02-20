@@ -3,87 +3,35 @@ from __future__ import annotations
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-# --- Localization maps ---
+# --- World presets: combined genre+tone+theme in one step ---
 
-_GENRE = {
+_WORLDS = {
     "ru": {
-        "fantasy": "⚔️ Фэнтези",
-        "sci-fi": "🚀 Научная фантастика",
+        "classic_fantasy": "⚔️ Классическое фэнтези",
         "dark_fantasy": "🧛 Тёмное фэнтези",
-        "pirate": "🌊 Пираты",
-        "steampunk": "🔮 Стимпанк",
-        "classic": "🏰 Классическое DnD",
-        "custom": "✏️ Свой вариант...",
+        "scifi": "🚀 Научная фантастика",
+        "pirate": "🏴‍☠️ Пиратские приключения",
+        "noir": "🔍 Нуар и детектив",
+        "horror": "👻 Хоррор",
+        "steampunk": "⚙️ Стимпанк",
+        "postapoc": "☢️ Постапокалипсис",
+        "custom": "✏️ Опишу сам...",
     },
     "en": {
-        "fantasy": "⚔️ Fantasy",
-        "sci-fi": "🚀 Sci-Fi",
+        "classic_fantasy": "⚔️ Classic Fantasy",
         "dark_fantasy": "🧛 Dark Fantasy",
-        "pirate": "🌊 Pirate",
-        "steampunk": "🔮 Steampunk",
-        "classic": "🏰 Classic DnD",
-        "custom": "✏️ Custom...",
-    },
-}
-
-_TONE = {
-    "ru": {
-        "epic": "🎭 Серьёзный и эпичный",
-        "humorous": "😄 Лёгкий и с юмором",
-        "dark": "🌑 Мрачный и жёсткий",
-        "balanced": "⚖️ Сбалансированный",
-        "custom": "✏️ Свой вариант...",
-    },
-    "en": {
-        "epic": "🎭 Serious & Epic",
-        "humorous": "😄 Light & Humorous",
-        "dark": "🌑 Dark & Gritty",
-        "balanced": "⚖️ Balanced",
-        "custom": "✏️ Custom...",
-    },
-}
-
-_THEME = {
-    "ru": {
-        "war": "🗡 Войны и сражения",
-        "mystery": "🔍 Тайны и интриги",
-        "monsters": "🐉 Охота на монстров",
-        "politics": "👑 Политика и власть",
-        "exploration": "🌍 Исследования",
-        "survival": "💀 Выживание",
-        "custom": "✏️ Свой вариант...",
-    },
-    "en": {
-        "war": "🗡 War & Conquest",
-        "mystery": "🔍 Mystery & Intrigue",
-        "monsters": "🐉 Monster Hunting",
-        "politics": "👑 Politics & Power",
-        "exploration": "🌍 Exploration",
-        "survival": "💀 Survival",
-        "custom": "✏️ Custom...",
-    },
-}
-
-_AGE = {
-    "ru": {
-        "13-15": "13–15",
-        "16-17": "16–17",
-        "18-24": "18–24",
-        "25-34": "25–34",
-        "35+": "35+",
-    },
-    "en": {
-        "13-15": "13–15",
-        "16-17": "16–17",
-        "18-24": "18–24",
-        "25-34": "25–34",
-        "35+": "35+",
+        "scifi": "🚀 Sci-Fi",
+        "pirate": "🏴‍☠️ Pirate Adventure",
+        "noir": "🔍 Noir & Detective",
+        "horror": "👻 Horror",
+        "steampunk": "⚙️ Steampunk",
+        "postapoc": "☢️ Post-Apocalyptic",
+        "custom": "✏️ I'll describe it...",
     },
 }
 
 
 def language_keyboard() -> InlineKeyboardMarkup:
-    """First screen — always in English, with flags."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang:ru"),
@@ -101,70 +49,39 @@ def language_keyboard() -> InlineKeyboardMarkup:
 
 
 def age_keyboard(lang: str) -> InlineKeyboardMarkup:
-    labels = _AGE.get(lang, _AGE["en"])
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text=labels["13-15"], callback_data="age:13-15"),
-            InlineKeyboardButton(text=labels["16-17"], callback_data="age:16-17"),
-            InlineKeyboardButton(text=labels["18-24"], callback_data="age:18-24"),
+            InlineKeyboardButton(text="13–15", callback_data="age:13-15"),
+            InlineKeyboardButton(text="16–17", callback_data="age:16-17"),
+            InlineKeyboardButton(text="18–24", callback_data="age:18-24"),
         ],
         [
-            InlineKeyboardButton(text=labels["25-34"], callback_data="age:25-34"),
-            InlineKeyboardButton(text=labels["35+"], callback_data="age:35+"),
+            InlineKeyboardButton(text="25–34", callback_data="age:25-34"),
+            InlineKeyboardButton(text="35+", callback_data="age:35+"),
         ],
     ])
 
 
-def genre_keyboard(lang: str) -> InlineKeyboardMarkup:
-    g = _GENRE.get(lang, _GENRE["en"])
+def world_keyboard(lang: str) -> InlineKeyboardMarkup:
+    w = _WORLDS.get(lang, _WORLDS["en"])
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text=g["fantasy"], callback_data="genre:fantasy"),
-            InlineKeyboardButton(text=g["sci-fi"], callback_data="genre:sci-fi"),
+            InlineKeyboardButton(text=w["classic_fantasy"], callback_data="world:classic_fantasy"),
+            InlineKeyboardButton(text=w["dark_fantasy"], callback_data="world:dark_fantasy"),
         ],
         [
-            InlineKeyboardButton(text=g["dark_fantasy"], callback_data="genre:dark_fantasy"),
-            InlineKeyboardButton(text=g["pirate"], callback_data="genre:pirate"),
+            InlineKeyboardButton(text=w["scifi"], callback_data="world:scifi"),
+            InlineKeyboardButton(text=w["pirate"], callback_data="world:pirate"),
         ],
         [
-            InlineKeyboardButton(text=g["steampunk"], callback_data="genre:steampunk"),
-            InlineKeyboardButton(text=g["classic"], callback_data="genre:classic"),
-        ],
-        [InlineKeyboardButton(text=g["custom"], callback_data="genre:custom")],
-    ])
-
-
-def tone_keyboard(lang: str) -> InlineKeyboardMarkup:
-    t = _TONE.get(lang, _TONE["en"])
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text=t["epic"], callback_data="tone:epic"),
-            InlineKeyboardButton(text=t["humorous"], callback_data="tone:humorous"),
+            InlineKeyboardButton(text=w["noir"], callback_data="world:noir"),
+            InlineKeyboardButton(text=w["horror"], callback_data="world:horror"),
         ],
         [
-            InlineKeyboardButton(text=t["dark"], callback_data="tone:dark"),
-            InlineKeyboardButton(text=t["balanced"], callback_data="tone:balanced"),
+            InlineKeyboardButton(text=w["steampunk"], callback_data="world:steampunk"),
+            InlineKeyboardButton(text=w["postapoc"], callback_data="world:postapoc"),
         ],
-        [InlineKeyboardButton(text=t["custom"], callback_data="tone:custom")],
-    ])
-
-
-def theme_keyboard(lang: str) -> InlineKeyboardMarkup:
-    t = _THEME.get(lang, _THEME["en"])
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text=t["war"], callback_data="theme:war"),
-            InlineKeyboardButton(text=t["mystery"], callback_data="theme:mystery"),
-        ],
-        [
-            InlineKeyboardButton(text=t["monsters"], callback_data="theme:monsters"),
-            InlineKeyboardButton(text=t["politics"], callback_data="theme:politics"),
-        ],
-        [
-            InlineKeyboardButton(text=t["exploration"], callback_data="theme:exploration"),
-            InlineKeyboardButton(text=t["survival"], callback_data="theme:survival"),
-        ],
-        [InlineKeyboardButton(text=t["custom"], callback_data="theme:custom")],
+        [InlineKeyboardButton(text=w["custom"], callback_data="world:custom")],
     ])
 
 
@@ -182,27 +99,59 @@ def char_creation_method_keyboard(lang: str) -> InlineKeyboardMarkup:
 
 def character_review_keyboard(lang: str) -> InlineKeyboardMarkup:
     if lang == "ru":
-        return InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✅ Принять", callback_data="charreview:accept"),
-                InlineKeyboardButton(text="🔄 Заново", callback_data="charreview:regen"),
-            ],
-        ])
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✅ Accept", callback_data="charreview:accept"),
-            InlineKeyboardButton(text="🔄 Regenerate", callback_data="charreview:regen"),
-        ],
-    ])
+        return InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="✅ Принять", callback_data="charreview:accept"),
+            InlineKeyboardButton(text="🔄 Заново", callback_data="charreview:regen"),
+        ]])
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Accept", callback_data="charreview:accept"),
+        InlineKeyboardButton(text="🔄 Regenerate", callback_data="charreview:regen"),
+    ]])
 
 
-def actions_keyboard(actions: list[str]) -> InlineKeyboardMarkup:
+def actions_keyboard(actions: list[str], lang: str = "en") -> InlineKeyboardMarkup:
     buttons = []
-    for action in actions[:6]:
+    for action in actions[:5]:
         buttons.append([InlineKeyboardButton(
             text=action, callback_data=f"act:{action[:60]}",
         )])
+    menu_label = "📋 Меню" if lang == "ru" else "📋 Menu"
+    buttons.append([InlineKeyboardButton(text=menu_label, callback_data="gamemenu:open")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def game_menu_keyboard(lang: str) -> InlineKeyboardMarkup:
+    if lang == "ru":
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📊 Персонаж", callback_data="gamemenu:stats"),
+                InlineKeyboardButton(text="🎒 Инвентарь", callback_data="gamemenu:inv"),
+            ],
+            [
+                InlineKeyboardButton(text="📜 Задание", callback_data="gamemenu:quest"),
+                InlineKeyboardButton(text="🗺 Локация", callback_data="gamemenu:location"),
+            ],
+            [
+                InlineKeyboardButton(text="🔄 Новое приключение", callback_data="gamemenu:newgame"),
+                InlineKeyboardButton(text="❓ Помощь", callback_data="gamemenu:help"),
+            ],
+            [InlineKeyboardButton(text="⬅️ Назад к игре", callback_data="gamemenu:close")],
+        ])
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📊 Character", callback_data="gamemenu:stats"),
+            InlineKeyboardButton(text="🎒 Inventory", callback_data="gamemenu:inv"),
+        ],
+        [
+            InlineKeyboardButton(text="📜 Quest", callback_data="gamemenu:quest"),
+            InlineKeyboardButton(text="🗺 Location", callback_data="gamemenu:location"),
+        ],
+        [
+            InlineKeyboardButton(text="🔄 New adventure", callback_data="gamemenu:newgame"),
+            InlineKeyboardButton(text="❓ Help", callback_data="gamemenu:help"),
+        ],
+        [InlineKeyboardButton(text="⬅️ Back to game", callback_data="gamemenu:close")],
+    ])
 
 
 def inventory_item_keyboard(item_index: int, lang: str = "en") -> InlineKeyboardMarkup:
@@ -211,7 +160,6 @@ def inventory_item_keyboard(item_index: int, lang: str = "en") -> InlineKeyboard
             [
                 InlineKeyboardButton(text="🔧 Использовать", callback_data=f"inv:use:{item_index}"),
                 InlineKeyboardButton(text="🗑 Выбросить", callback_data=f"inv:drop:{item_index}"),
-                InlineKeyboardButton(text="🔍 Осмотреть", callback_data=f"inv:inspect:{item_index}"),
             ],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="inv:back")],
         ])
@@ -219,7 +167,6 @@ def inventory_item_keyboard(item_index: int, lang: str = "en") -> InlineKeyboard
         [
             InlineKeyboardButton(text="🔧 Use", callback_data=f"inv:use:{item_index}"),
             InlineKeyboardButton(text="🗑 Drop", callback_data=f"inv:drop:{item_index}"),
-            InlineKeyboardButton(text="🔍 Inspect", callback_data=f"inv:inspect:{item_index}"),
         ],
         [InlineKeyboardButton(text="⬅️ Back", callback_data="inv:back")],
     ])
@@ -231,7 +178,5 @@ def inventory_list_keyboard(items: list[dict]) -> InlineKeyboardMarkup:
         name = item.get("name", "???")
         qty = item.get("quantity", 1)
         label = f"{name} x{qty}" if qty > 1 else name
-        buttons.append([InlineKeyboardButton(
-            text=label, callback_data=f"inv:select:{i}"
-        )])
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"inv:select:{i}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
