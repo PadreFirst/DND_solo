@@ -63,6 +63,7 @@ class OnboardingState(str, enum.Enum):
     AGE_ASKED = "age_asked"
     WORLD_SETUP = "world_setup"
     WORLD_CUSTOM = "world_custom"
+    TONE_SELECT = "tone_select"
     CHAR_NAME = "char_name"
     CHAR_METHOD = "char_method"
     CHAR_FREE_DESC = "char_free_desc"

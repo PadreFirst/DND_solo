@@ -9,3 +9,4 @@ dist/
 build/
 .cursor/
 test_gemini.py
+Boss/

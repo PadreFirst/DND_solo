@@ -8,7 +8,7 @@ import sys
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.types import BotCommand
+from aiogram.types import BotCommand, MenuButtonCommands
 
 from bot.config import settings
 from bot.db.engine import init_db
@@ -40,6 +40,7 @@ async def set_bot_commands(bot: Bot) -> None:
         BotCommand(command="help", description="Help / Справка"),
     ]
     await bot.set_my_commands(commands)
+    await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
 
 
 async def main() -> None:

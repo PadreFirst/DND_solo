@@ -1,11 +1,12 @@
 WELCOME = "🎲 <b>Choose your language / Выберите язык</b>"
 
 ONBOARDING_PLAN = (
-    "🗺 <b>We'll create your adventure in 4 steps:</b>\n\n"
+    "🗺 <b>We'll create your adventure in 5 steps:</b>\n\n"
     "1️⃣ Age — I'll tailor the style for you\n"
     "2️⃣ World — pick a setting or describe your own\n"
-    "3️⃣ Character — we'll build your hero\n"
-    "4️⃣ Mission — and off you go!\n\n"
+    "3️⃣ Tone — narrative style\n"
+    "4️⃣ Character — we'll build your hero\n"
+    "5️⃣ Mission — and off you go!\n\n"
     "Let's start 👇"
 )
 
@@ -23,6 +24,11 @@ WORLD_CUSTOM = (
     "<i>Example: 'A grim world where magic is outlawed, "
     "and secret sorcerer orders hide in catacombs beneath cities. "
     "Think industrial revolution era.'</i>"
+)
+
+TONE_SELECT = (
+    "🎭 <b>Choose your narrative style</b>\n\n"
+    "This sets the tone for the entire adventure."
 )
 
 CHAR_NAME_ASK = "⚔️ <b>What is your hero's name?</b>"
@@ -51,10 +57,18 @@ CHAR_EXTRA = (
 CHAR_GENERATING = "⏳ Creating character..."
 CHAR_REVIEW = "📋 <b>Character ready!</b>\n\n{sheet}\n\n📖 <b>Backstory:</b>\n{backstory}"
 MISSION_GENERATING = "🌍 Generating your starting mission..."
-GAME_START = "🎮 <b>The adventure begins!</b>\n\n{opening_scene}\n\n<i>What do you do?</i>"
+GAME_START = "🎮 <b>The adventure begins!</b>\n\n{opening_scene}"
 
 LEVEL_UP = "🎉 <b>LEVEL UP!</b>\n\n{name} → Lv.{level}\nHP: {old_hp} → {new_hp} | Proficiency: +{prof}"
 DEATH = "💀 <b>{name} has fallen...</b>\n\nDarkness envelops you...\n\n/start — new adventure"
 ERROR = "⚠️ Something went wrong. Try again or /start"
-MENU_HELP = "📋 <b>Commands:</b>\n/start — New adventure\n/stats — Character\n/inventory — Inventory\n/quest — Quest\n/help — Help"
+MENU_HELP = (
+    "📋 <b>Commands:</b>\n"
+    "/start — New adventure\n"
+    "/stats — Character\n"
+    "/inventory — Inventory\n"
+    "/quest — Quest\n"
+    "/help — Help\n\n"
+    "Or press <b>Menu</b> under any response."
+)
 LOCATION_INFO = "📍 <b>Current location:</b> {location}"

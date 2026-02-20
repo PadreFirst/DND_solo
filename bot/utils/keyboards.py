@@ -85,6 +85,43 @@ def world_keyboard(lang: str) -> InlineKeyboardMarkup:
     ])
 
 
+_TONES = {
+    "ru": {
+        "dark": "🌑 Мрачный и тёмный",
+        "heroic": "⚔️ Героический и эпический",
+        "humor": "😄 Юмористический",
+        "realistic": "🎯 Реалистичный и жёсткий",
+        "mystery": "🔮 Загадочный и мистический",
+    },
+    "en": {
+        "dark": "🌑 Dark & Grim",
+        "heroic": "⚔️ Heroic & Epic",
+        "humor": "😄 Humorous & Lighthearted",
+        "realistic": "🎯 Realistic & Gritty",
+        "mystery": "🔮 Mysterious & Suspenseful",
+    },
+}
+
+TONE_DESCRIPTIONS = {
+    "dark": "Dark, grim, morally gray. Violence has weight, hope is scarce, atmosphere is oppressive.",
+    "heroic": "Heroic, epic, inspiring. Grand battles, noble sacrifices, triumph against the odds.",
+    "humor": "Lighthearted, witty, comedic. Pop culture references, absurd situations, fun above all.",
+    "realistic": "Grounded, gritty, consequential. Actions have real consequences, no plot armor.",
+    "mystery": "Suspenseful, enigmatic, atmospheric. Secrets everywhere, trust no one, slow revelations.",
+}
+
+
+def tone_keyboard(lang: str) -> InlineKeyboardMarkup:
+    t = _TONES.get(lang, _TONES["en"])
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=t["dark"], callback_data="tone:dark")],
+        [InlineKeyboardButton(text=t["heroic"], callback_data="tone:heroic")],
+        [InlineKeyboardButton(text=t["humor"], callback_data="tone:humor")],
+        [InlineKeyboardButton(text=t["realistic"], callback_data="tone:realistic")],
+        [InlineKeyboardButton(text=t["mystery"], callback_data="tone:mystery")],
+    ])
+
+
 def char_creation_method_keyboard(lang: str) -> InlineKeyboardMarkup:
     if lang == "ru":
         return InlineKeyboardMarkup(inline_keyboard=[

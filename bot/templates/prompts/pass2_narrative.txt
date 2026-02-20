@@ -16,4 +16,7 @@ Write an immersive narrative describing what happens. Rules:
 - End with the current situation clearly described so the player knows what they can do next.
 - Keep it under 300 words — concise but vivid. For combat, shorter. For exploration/dialogue, can be slightly longer.
 - Do NOT list game stats in the narrative. The UI handles stat display separately.
-- Write in {language}.
+
+FORMATTING: Use HTML tags for Telegram: <b>bold</b> for emphasis, <i>italic</i> for thoughts/whispers/atmosphere. Do NOT use markdown (no ** or * or __ formatting). Only HTML tags.
+
+Write in {language}.

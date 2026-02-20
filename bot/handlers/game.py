@@ -22,6 +22,7 @@ from bot.utils.formatters import (
     format_character_sheet,
     format_inventory,
     format_quest,
+    md_to_html,
     truncate_for_telegram,
 )
 from bot.utils.i18n import t
@@ -196,7 +197,7 @@ async def _process_player_action(
     # --- Pass 1 ---
     try:
         decision: MechanicsDecision = await generate_structured(
-            pass1_prompt(full_context, player_action),
+            pass1_prompt(full_context, player_action, language=user.language),
             MechanicsDecision, content_tier=user.content_tier.value,
         )
     except Exception as e:
@@ -277,6 +278,7 @@ async def _process_player_action(
         log.exception("Pass 2 failed")
         narrative = decision.narration_context or "..."
 
+    narrative = md_to_html(narrative)
     gs.append_message("assistant", narrative)
 
     if decision.important_event:

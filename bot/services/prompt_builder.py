@@ -67,9 +67,9 @@ def mission_prompt(
     )
 
 
-def pass1_prompt(context: str, player_action: str) -> str:
+def pass1_prompt(context: str, player_action: str, language: str = "en") -> str:
     tpl = _load("pass1_mechanics.txt")
-    return tpl.format(context=context, player_action=player_action)
+    return tpl.format(context=context, player_action=player_action, language=language)
 
 
 def pass2_prompt(

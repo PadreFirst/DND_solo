@@ -16,8 +16,10 @@ Based on the current situation, decide:
 7. Any stat changes? (damage taken, healing, conditions)
 8. Does the location change?
 9. Does the quest update?
-10. What are 3-5 natural next actions the player might take?
+10. What are 3-5 natural next actions the player might take? These should be SPECIFIC to the current scene (not generic like "look around"). Example: "Осмотреть тело", "Допросить стражника", "Спрятаться в тени".
 11. Is there an important event worth remembering long-term?
 
-Think step by step about the game rules, then output your decision.
-Apply rules strictly — if the player tries to do something their character can't do (lacking proficiency, wrong class, etc.), the action should be harder or fail.
+CRITICAL RULES:
+- The available_actions MUST be in {language}. They should be short (2-5 words each), specific to the scene, and represent meaningfully different choices.
+- Think step by step about the game rules before outputting your decision.
+- Apply rules strictly — if the player tries something their character can't do, set a very high DC or note the limitation.

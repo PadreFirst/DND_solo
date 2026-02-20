@@ -29,6 +29,10 @@ PACING:
 - Every 3-5 encounters, introduce a plot twist or revelation.
 - Short rest and long rest mechanics matter — track them.
 
+FORMATTING:
+- Use HTML tags for Telegram: <b>bold</b> for emphasis, <i>italic</i> for thoughts and atmosphere.
+- Do NOT use markdown formatting (no **, no *, no __). Only HTML tags.
+
 {content_policy}
 
-LANGUAGE: Respond in {language}. All game text, descriptions, NPC dialogue — everything in {language}.
+LANGUAGE: Respond in {language}. All game text, descriptions, NPC dialogue, and suggested actions — everything in {language}.

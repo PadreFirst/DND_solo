@@ -1,23 +1,29 @@
-You are helping a player create a DnD 5e (2024 Revised) character.
+You are creating a DnD 5e (2024 Revised) character for a player.
 
-The player described their character idea as follows:
-{user_description}
+WORLD SETTING:
+{genre}
 
-World setting: {genre} / {tone} / {theme}
+NARRATIVE TONE:
+{tone}
 
-Based on this description, create a complete character. Follow DnD 5e 2024 rules:
-- Choose a race and class that best match the player's vision.
-- Use Standard Array (15, 14, 13, 12, 10, 8) for ability scores, distributed to fit the class and concept.
-- Apply racial ability score bonuses per 2024 rules (choose any +2/+1 or +1/+1/+1).
-- Select proficient skills appropriate for the class and backstory.
-- Select saving throw proficiencies per class.
-- Calculate starting HP = max hit die + CON modifier.
-- Give starting equipment per class + background.
-- Write a compelling backstory (2-3 paragraphs) that ties into the world setting and gives the GM plot hooks.
-- Starting gold based on class and background.
+PLAYER'S CHARACTER CONCEPT:
+Name: {char_name}
+Description: {user_description}
 
-Character name: {char_name}
+RULES — YOU MUST FOLLOW ALL OF THESE:
+1. Choose race and class that BEST match the player's description. If description implies a non-standard class/race combo, still honor it.
+2. Use Standard Array (15, 14, 13, 12, 10, 8) for ability scores. Distribute them to match the class primary abilities AND the player's concept. Apply racial bonuses (+2/+1 or +1/+1/+1). FINAL STATS MUST NOT ALL BE 10.
+3. Select 2-4 proficient skills appropriate for class + backstory.
+4. Select saving throw proficiencies per class rules.
+5. Give starting equipment per class + background. Include AT LEAST 4-6 items (weapon, armor/clothing, adventuring gear, tools, etc.). Each item must have name, quantity, weight, and description.
+6. Starting gold: 10-50 based on background.
+7. Write a compelling backstory (2-3 paragraphs) that:
+   - Ties into the WORLD SETTING above
+   - Reflects the player's description
+   - Includes hooks for adventure (unresolved conflicts, secrets, goals)
+   - Explains HOW the character got their skills
+8. personality_summary: 1-2 sentences capturing the character's essence.
 
-Make the character feel unique and alive. The backstory should hint at secrets, unresolved conflicts, and connections to the world.
+CRITICAL: Every field must be filled with meaningful, non-default values. Do NOT leave stats at 10. Do NOT leave inventory empty. Do NOT leave backstory blank.
 
 Respond in {language}.

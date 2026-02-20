@@ -1,8 +1,19 @@
 """Telegram message formatting: HP bars, stat blocks, dice displays."""
 from __future__ import annotations
 
+import re
+
 from bot.models.character import Character
 from bot.services.game_engine import XP_THRESHOLDS
+
+
+def md_to_html(text: str) -> str:
+    """Convert markdown bold/italic to HTML tags for Telegram."""
+    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+    text = re.sub(r'__(.+?)__', r'<b>\1</b>', text)
+    text = re.sub(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'<i>\1</i>', text)
+    text = re.sub(r'(?<!_)_(?!_)(.+?)(?<!_)_(?!_)', r'<i>\1</i>', text)
+    return text
 
 
 def progress_bar(current: int, maximum: int, length: int = 10) -> str:

@@ -1,4 +1,4 @@
-"""Onboarding: /start -> language -> age -> world -> character -> mission."""
+"""Onboarding: /start -> language -> age -> world -> tone -> character -> mission."""
 from __future__ import annotations
 
 import json
@@ -15,14 +15,16 @@ from bot.services.character_gen import apply_proposal, generate_character
 from bot.services.gemini import GeminiError, MissionProposal, generate_structured
 from bot.services.prompt_builder import mission_prompt
 from bot.services.user_service import ensure_character, ensure_session, get_or_create_user, reset_game
-from bot.utils.formatters import format_character_sheet, truncate_for_telegram
+from bot.utils.formatters import format_character_sheet, md_to_html, truncate_for_telegram
 from bot.utils.i18n import t
 from bot.utils.keyboards import (
+    TONE_DESCRIPTIONS,
     actions_keyboard,
     age_keyboard,
     char_creation_method_keyboard,
     character_review_keyboard,
     language_keyboard,
+    tone_keyboard,
     world_keyboard,
 )
 
@@ -53,7 +55,6 @@ async def _typing(event: Message | CallbackQuery) -> None:
 
 
 async def _send_error(event: Message | CallbackQuery, user: User, error: Exception) -> None:
-    """Send a meaningful error to the user without losing progress."""
     if isinstance(error, GeminiError):
         text = error.user_message(user.language)
     else:
@@ -123,12 +124,26 @@ async def on_world(cb: CallbackQuery, db: AsyncSession) -> None:
     else:
         gs.genre = choice
         gs.world_state = json.dumps({"world_desc": WORLD_PRESETS.get(choice, choice)})
-        user.onboarding_state = OnboardingState.CHAR_NAME
-        await cb.message.edit_text(t("CHAR_NAME_ASK", user.language), parse_mode="HTML")
+        user.onboarding_state = OnboardingState.TONE_SELECT
+        await cb.message.edit_text(t("TONE_SELECT", user.language), parse_mode="HTML",
+                                   reply_markup=tone_keyboard(user.language))
     await cb.answer()
 
 
-# ---- 4. Character method ----
+# ---- 4. Tone ----
+
+@router.callback_query(F.data.startswith("tone:"))
+async def on_tone(cb: CallbackQuery, db: AsyncSession) -> None:
+    user = await get_or_create_user(cb.from_user.id, cb.from_user.username, db)
+    gs = await ensure_session(user, db)
+    tone_key = cb.data.split(":")[1]
+    gs.tone = TONE_DESCRIPTIONS.get(tone_key, tone_key)
+    user.onboarding_state = OnboardingState.CHAR_NAME
+    await cb.message.edit_text(t("CHAR_NAME_ASK", user.language), parse_mode="HTML")
+    await cb.answer()
+
+
+# ---- 5. Character method ----
 
 @router.callback_query(F.data.startswith("charmethod:"))
 async def on_char_method(cb: CallbackQuery, db: AsyncSession) -> None:
@@ -142,7 +157,7 @@ async def on_char_method(cb: CallbackQuery, db: AsyncSession) -> None:
     await cb.answer()
 
 
-# ---- 5. Character review ----
+# ---- 6. Character review ----
 
 @router.callback_query(F.data.startswith("charreview:"))
 async def on_char_review(cb: CallbackQuery, db: AsyncSession) -> None:
@@ -167,7 +182,7 @@ async def on_char_review(cb: CallbackQuery, db: AsyncSession) -> None:
 
         prompt = mission_prompt(
             char_name=char.name, race=char.race, char_class=char.char_class,
-            backstory=char.backstory, genre=world_desc, tone="adaptive",
+            backstory=char.backstory, genre=world_desc, tone=gs.tone,
             theme="adventure", language=user.language,
         )
         mission: MissionProposal = await generate_structured(
@@ -181,12 +196,14 @@ async def on_char_review(cb: CallbackQuery, db: AsyncSession) -> None:
                                "role": mission.first_npc_role,
                                "personality": mission.first_npc_personality}]
         gs.turn_number = 1
-        gs.append_message("assistant", mission.opening_scene)
+
+        opening = md_to_html(mission.opening_scene)
+        gs.append_message("assistant", opening)
         user.onboarding_state = OnboardingState.PLAYING
 
         actions = _default_actions(user.language)
         await cb.message.answer(
-            t("GAME_START", user.language, opening_scene=truncate_for_telegram(mission.opening_scene, 3500)),
+            t("GAME_START", user.language, opening_scene=truncate_for_telegram(opening, 3500)),
             parse_mode="HTML",
             reply_markup=actions_keyboard(actions, user.language),
         )
@@ -213,8 +230,9 @@ async def handle_onboarding_text(message: Message, user: User, db: AsyncSession)
         gs = await ensure_session(user, db)
         gs.genre = "custom"
         gs.world_state = json.dumps({"world_desc": text}, ensure_ascii=False)
-        user.onboarding_state = OnboardingState.CHAR_NAME
-        await message.answer(t("CHAR_NAME_ASK", user.language), parse_mode="HTML")
+        user.onboarding_state = OnboardingState.TONE_SELECT
+        await message.answer(t("TONE_SELECT", user.language), parse_mode="HTML",
+                             reply_markup=tone_keyboard(user.language))
         return True
 
     if state == OnboardingState.CHAR_NAME:
@@ -305,7 +323,8 @@ async def _generate_char(message: Message, user: User, description: str, db: Asy
 
         proposal = await generate_character(
             user_description=description, char_name=char.name,
-            genre=world_desc, tone="adaptive", theme="adventure",
+            genre=world_desc, tone=gs.tone or "adaptive",
+            theme="adventure",
             language=user.language, content_tier=user.content_tier.value,
         )
         apply_proposal(char, proposal)
