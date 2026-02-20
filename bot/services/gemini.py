@@ -268,6 +268,67 @@ def _strip_code_fences(text: str) -> str:
     return text.strip()
 
 
+def _repair_json(text: str) -> str:
+    """Best-effort repair of malformed JSON from Gemini.
+
+    Handles: control chars inside strings, truncated output, trailing commas.
+    """
+    import re
+
+    # Remove control characters except \n \r \t inside strings
+    cleaned = []
+    in_string = False
+    escape = False
+    for ch in text:
+        if escape:
+            cleaned.append(ch)
+            escape = False
+            continue
+        if ch == '\\':
+            cleaned.append(ch)
+            escape = True
+            continue
+        if ch == '"' and not escape:
+            in_string = not in_string
+            cleaned.append(ch)
+            continue
+        if in_string:
+            if ch == '\n':
+                cleaned.append('\\n')
+                continue
+            if ch == '\r':
+                continue
+            if ch == '\t':
+                cleaned.append('\\t')
+                continue
+            if ord(ch) < 32:
+                continue
+        cleaned.append(ch)
+    text = "".join(cleaned)
+
+    # Fix trailing commas before } or ]
+    text = re.sub(r',\s*([}\]])', r'\1', text)
+
+    # If JSON is truncated (no closing }), try to close it
+    if text.count('{') > text.count('}'):
+        open_braces = text.count('{') - text.count('}')
+        # Find last complete key-value pair
+        last_quote = text.rfind('"')
+        if last_quote > 0:
+            # Check if we're in the middle of a string value
+            after = text[last_quote + 1:].strip()
+            if not after or after == '':
+                text = text[:last_quote + 1]
+                text += '"' * 0  # already closed
+            # Close any unclosed strings
+            quote_count = text.count('"')
+            if quote_count % 2 != 0:
+                text += '"'
+        text += '}' * open_braces
+
+    return text
+
+
 def _get_origin_type(field) -> str:
     """Extract the base type from a field annotation for safe matching."""
     import typing
@@ -396,37 +457,68 @@ async def generate_structured(
         f"CRITICAL: Output ONLY the JSON object. No markdown, no explanation, no schema — just the data."
     )
     log.debug("Gemini structured [%s] (%s)", model, schema.__name__)
-    try:
-        data = await _call_gemini(
-            model=model,
-            contents=[{"parts": [{"text": full_prompt}]}],
-            generation_config={
-                "responseMimeType": "application/json",
-                "temperature": 0.7,
-                "maxOutputTokens": 4096,
-            },
-            safety_settings=SAFETY_OFF,
-        )
-        text = _extract_text(data)
-        log.debug("Gemini structured response: %s", text[:500])
-        text = _strip_code_fences(text)
-        raw = json.loads(text)
-        if "properties" in raw and isinstance(raw.get("properties"), dict):
-            first_val = next(iter(raw["properties"].values()), {})
-            if isinstance(first_val, dict) and "type" in first_val:
-                log.warning("Gemini returned schema instead of data, extracting defaults")
-                flat = {}
-                for k, v in raw["properties"].items():
-                    flat[k] = v.get("default", v.get("type", ""))
-                raw = flat
-        raw = _coerce_types(raw, schema)
-        raw = _coerce_nested(raw, schema)
-        return schema.model_validate(raw)
-    except GeminiError:
-        raise
-    except Exception as e:
-        log.exception("Gemini structured failed [%s]", model)
-        raise GeminiError(f"structured/{schema.__name__}", e) from e
+    last_error = None
+    for attempt in range(2):
+        try:
+            data = await _call_gemini(
+                model=model,
+                contents=[{"parts": [{"text": full_prompt}]}],
+                generation_config={
+                    "responseMimeType": "application/json",
+                    "temperature": 0.7 if attempt == 0 else 0.4,
+                    "maxOutputTokens": 4096,
+                },
+                safety_settings=SAFETY_OFF,
+            )
+            text = _extract_text(data)
+            log.debug("Gemini structured response (attempt %d): %s", attempt + 1, text[:500])
+            text = _strip_code_fences(text)
+
+            # Try direct parse first, then repair
+            raw = None
+            try:
+                raw = json.loads(text)
+            except json.JSONDecodeError:
+                log.warning("JSON parse failed, attempting repair (attempt %d)", attempt + 1)
+                repaired = _repair_json(text)
+                try:
+                    raw = json.loads(repaired)
+                    log.info("JSON repair succeeded")
+                except json.JSONDecodeError as je:
+                    log.warning("JSON repair also failed: %s", je)
+                    if attempt == 0:
+                        last_error = je
+                        log.info("Retrying with lower temperature...")
+                        await asyncio.sleep(1)
+                        continue
+                    raise
+
+            if raw is None:
+                raise json.JSONDecodeError("Failed to parse", text[:100], 0)
+
+            if "properties" in raw and isinstance(raw.get("properties"), dict):
+                first_val = next(iter(raw["properties"].values()), {})
+                if isinstance(first_val, dict) and "type" in first_val:
+                    log.warning("Gemini returned schema instead of data, extracting defaults")
+                    flat = {}
+                    for k, v in raw["properties"].items():
+                        flat[k] = v.get("default", v.get("type", ""))
+                    raw = flat
+            raw = _coerce_types(raw, schema)
+            raw = _coerce_nested(raw, schema)
+            return schema.model_validate(raw)
+        except GeminiError:
+            raise
+        except Exception as e:
+            if attempt == 0:
+                last_error = e
+                log.warning("Structured gen attempt 1 failed: %s, retrying...", e)
+                await asyncio.sleep(1)
+                continue
+            log.exception("Gemini structured failed [%s] after %d attempts", model, attempt + 1)
+            raise GeminiError(f"structured/{schema.__name__}", e) from e
+
+    raise GeminiError(f"structured/{schema.__name__}", last_error or Exception("all attempts failed"))
 
 
 async def generate_narrative(prompt: str, content_tier: str = "full") -> str:
