@@ -32,6 +32,23 @@ def _roll_die(sides: int) -> int:
     return secrets.randbelow(sides) + 1
 
 
+def _sanitize_dice(raw: str) -> str:
+    """Normalize a dice string, handling common AI-generated variants."""
+    import re
+    raw = raw.strip().lower()
+    if not raw:
+        return "1d4"
+    m = re.search(r'(\d+)\s*d\s*(\d+)', raw)
+    if m:
+        return f"{m.group(1)}d{m.group(2)}"
+    if raw.startswith("d") and raw[1:].isdigit():
+        return f"1{raw}"
+    m = re.match(r'^(\d+)$', raw)
+    if m:
+        return f"1d{m.group(1)}"
+    return "1d4"
+
+
 def roll(
     dice_str: str,
     modifier: int = 0,
@@ -40,9 +57,7 @@ def roll(
     reason: str = "",
 ) -> RollResult:
     """Roll dice in NdM format (e.g. '2d6', '1d20', 'd8')."""
-    dice_str = dice_str.lower().strip()
-    if dice_str.startswith("d"):
-        dice_str = "1" + dice_str
+    dice_str = _sanitize_dice(dice_str)
 
     parts = dice_str.split("d")
     count = int(parts[0])

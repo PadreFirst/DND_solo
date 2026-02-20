@@ -285,17 +285,23 @@ async def _process_player_action(
         mechanics_lines.append(r.display)
 
     if decision.attack_target_ac and decision.attack_target_ac > 0:
-        atk = engine.make_attack(
-            char, decision.attack_target_ac,
-            decision.attack_damage_dice or "1d8", decision.attack_ability, True,
-        )
-        mechanics_lines.append(atk.display)
+        try:
+            atk = engine.make_attack(
+                char, decision.attack_target_ac,
+                decision.attack_damage_dice or "1d8", decision.attack_ability or "strength", True,
+            )
+            mechanics_lines.append(atk.display)
+        except Exception:
+            log.warning("Attack failed: ac=%s dice=%s", decision.attack_target_ac, decision.attack_damage_dice)
 
     for npc in decision.npc_actions:
         if npc.damage_dice:
-            dmg = engine.roll(npc.damage_dice, reason=f"{npc.name}")
-            status = engine.apply_damage(char, dmg.total)
-            mechanics_lines.append(f"{npc.name}: {dmg.display} → {status}")
+            try:
+                dmg = engine.roll(npc.damage_dice, reason=f"{npc.name}")
+                status = engine.apply_damage(char, dmg.total)
+                mechanics_lines.append(f"{npc.name}: {dmg.display} → {status}")
+            except Exception:
+                log.warning("Failed to roll NPC damage dice: %s", npc.damage_dice)
 
     for sc in decision.stat_changes:
         if sc.stat == "current_hp" and sc.delta < 0:

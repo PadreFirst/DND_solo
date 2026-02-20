@@ -111,21 +111,21 @@ class InventoryItem(BaseModel):
 
 
 class SkillCheckRequest(BaseModel):
-    skill: str = Field(description="Skill name")
-    dc: int = Field(description="Difficulty class")
+    skill: str = Field(default="Perception", description="Skill name")
+    dc: int = Field(default=10, description="Difficulty class")
     advantage: bool = False
     disadvantage: bool = False
 
 
 class SavingThrowRequest(BaseModel):
-    ability: str = Field(description="strength/dexterity/constitution/intelligence/wisdom/charisma")
-    dc: int = Field(description="Difficulty class")
+    ability: str = Field(default="dexterity", description="strength/dexterity/constitution/intelligence/wisdom/charisma")
+    dc: int = Field(default=10, description="Difficulty class")
     advantage: bool = False
     disadvantage: bool = False
 
 
 class ItemChange(BaseModel):
-    action: str = Field(description="'add' or 'remove'")
+    action: str = Field(default="add", description="'add' or 'remove'")
     name: str = ""
     quantity: int = 1
     weight: float = 0.0
@@ -133,14 +133,14 @@ class ItemChange(BaseModel):
 
 
 class StatChange(BaseModel):
-    stat: str = Field(description="Field name: current_hp, gold, etc.")
-    delta: int = Field(description="Change amount (negative for decrease)")
+    stat: str = Field(default="", description="Field name: current_hp, gold, etc.")
+    delta: int = Field(default=0, description="Change amount (negative for decrease)")
 
 
 class NPCAction(BaseModel):
     name: str = ""
     action: str = ""
-    damage_dice: str = ""
+    damage_dice: str | None = ""
 
 
 class MechanicsDecision(BaseModel):
@@ -339,6 +339,47 @@ def _coerce_types(raw: dict, schema: type[BaseModel]) -> dict:
     return raw
 
 
+def _coerce_nested(raw: dict, schema: type[BaseModel]) -> dict:
+    """Recursively fix None values inside nested list[BaseModel] fields."""
+    import typing
+    for key, field in schema.model_fields.items():
+        if key not in raw:
+            continue
+        ann = field.annotation
+        origin = getattr(ann, "__origin__", None)
+        if origin is not list:
+            continue
+        args = getattr(ann, "__args__", ())
+        if not args:
+            continue
+        inner = args[0]
+        if not (isinstance(inner, type) and issubclass(inner, BaseModel)):
+            continue
+        items = raw[key]
+        if not isinstance(items, list):
+            continue
+        for i, item in enumerate(items):
+            if isinstance(item, dict):
+                for fk, ff in inner.model_fields.items():
+                    if fk in item and item[fk] is None:
+                        default = ff.default
+                        if default is not None:
+                            item[fk] = default
+                        else:
+                            ftype = _get_origin_type(ff)
+                            if ftype == "str":
+                                item[fk] = ""
+                            elif ftype == "int":
+                                item[fk] = 0
+                            elif ftype == "float":
+                                item[fk] = 0.0
+                            elif ftype == "bool":
+                                item[fk] = False
+                            elif ftype == "list":
+                                item[fk] = []
+    return raw
+
+
 async def generate_structured(
     prompt: str,
     schema: type[BaseModel],
@@ -379,6 +420,7 @@ async def generate_structured(
                     flat[k] = v.get("default", v.get("type", ""))
                 raw = flat
         raw = _coerce_types(raw, schema)
+        raw = _coerce_nested(raw, schema)
         return schema.model_validate(raw)
     except GeminiError:
         raise
