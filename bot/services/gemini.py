@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from typing import Any
 
 import httpx
 from pydantic import BaseModel, Field
@@ -51,22 +52,46 @@ async def _call_gemini(
     generation_config: dict | None = None,
     safety_settings: list[dict] | None = None,
 ) -> dict:
-    url = f"{_BASE}/v1beta/models/{model}:generateContent?key={_API_KEY}"
-    body: dict = {"contents": contents}
-    if generation_config:
-        body["generationConfig"] = generation_config
-    if safety_settings:
-        body["safetySettings"] = safety_settings
-
     client = await _get_client()
-    resp = await client.post(url, json=body)
-    data = resp.json()
+    models_to_try = [model]
+    if model != settings.gemini_model:
+        models_to_try.append(settings.gemini_model)
 
-    if "error" in data:
-        err = data["error"]
-        raise GeminiError("api", Exception(f"{err.get('code')} {err.get('status')}. {err.get('message', '')}"))
+    last_err = None
+    for attempt_model in models_to_try:
+        for attempt in range(3):
+            url = f"{_BASE}/v1beta/models/{attempt_model}:generateContent?key={_API_KEY}"
+            body: dict = {"contents": contents}
+            if generation_config:
+                body["generationConfig"] = generation_config
+            if safety_settings:
+                body["safetySettings"] = safety_settings
 
-    return data
+            resp = await client.post(url, json=body)
+            data = resp.json()
+
+            if "error" not in data:
+                if attempt_model != model:
+                    log.info("Fallback to %s succeeded (original %s unavailable)", attempt_model, model)
+                return data
+
+            err = data["error"]
+            code = err.get("code", 0)
+            last_err = err
+
+            if code in (503, 429):
+                wait = 2 ** attempt + 1
+                log.warning("Gemini %s returned %d, retry %d in %ds", attempt_model, code, attempt + 1, wait)
+                await asyncio.sleep(wait)
+                continue
+            else:
+                raise GeminiError("api", Exception(f"{code} {err.get('status')}. {err.get('message', '')}"))
+
+        log.warning("All retries exhausted for %s, trying next model", attempt_model)
+
+    raise GeminiError("api", Exception(
+        f"{last_err.get('code')} {last_err.get('status')}. {last_err.get('message', '')}"
+    ))
 
 
 def _extract_text(data: dict) -> str:
@@ -197,27 +222,40 @@ class GeminiError(Exception):
         return f"⚠️ Ошибка AI: {s[:150]}" if ru else f"⚠️ AI error: {s[:150]}"
 
 
-def _schema_hint(schema: type[BaseModel]) -> str:
+def _make_example(schema: type[BaseModel]) -> str:
+    """Generate a flat example JSON for the model — no schema nesting, just key: placeholder."""
     full = schema.model_json_schema()
-    defs = full.pop("$defs", {})
+    defs = full.get("$defs", {})
+    props = full.get("properties", {})
 
-    def _resolve(obj: dict) -> dict:
-        if "$ref" in obj:
-            ref_name = obj["$ref"].split("/")[-1]
-            return _resolve(defs.get(ref_name, {}))
-        if obj.get("type") == "array" and "items" in obj:
-            obj = dict(obj)
-            obj["items"] = _resolve(obj["items"])
-        if "properties" in obj:
-            obj = dict(obj)
-            obj["properties"] = {k: _resolve(v) for k, v in obj["properties"].items()}
-        return obj
+    def _placeholder(prop: dict, key: str = "") -> Any:
+        if "$ref" in prop:
+            ref_name = prop["$ref"].split("/")[-1]
+            ref_schema = defs.get(ref_name, {})
+            return _obj_placeholder(ref_schema)
+        t = prop.get("type", "string")
+        if t == "string":
+            desc = prop.get("description", "")
+            return desc if desc else f"<{key or 'text'}>"
+        if t == "integer":
+            return 1
+        if t == "number":
+            return 0.5
+        if t == "boolean":
+            return False
+        if t == "array":
+            items = prop.get("items", {})
+            return [_placeholder(items, key)]
+        return f"<{key}>"
 
-    resolved = _resolve(full)
-    resolved.pop("title", None)
-    for p in resolved.get("properties", {}).values():
-        p.pop("title", None)
-    return json.dumps(resolved, indent=2, ensure_ascii=False)
+    def _obj_placeholder(schema_obj: dict) -> dict:
+        obj_props = schema_obj.get("properties", {})
+        return {k: _placeholder(v) for k, v in obj_props.items()}
+
+    example = {}
+    for key, prop in props.items():
+        example[key] = _placeholder(prop, key)
+    return json.dumps(example, indent=2, ensure_ascii=False)
 
 
 async def generate_structured(
@@ -227,11 +265,13 @@ async def generate_structured(
     heavy: bool = False,
 ) -> BaseModel:
     model = _pick_model(heavy)
-    hint = _schema_hint(schema)
+    example = _make_example(schema)
     full_prompt = (
         f"{prompt}\n\n"
-        f"RESPOND WITH ONLY VALID JSON matching this structure:\n{hint}\n"
-        f"Output ONLY the JSON object."
+        f"OUTPUT FORMAT: Return a single flat JSON object with these exact keys. "
+        f"Fill ALL values with real, meaningful content. Here is an EXAMPLE of the structure (replace placeholder values with real ones):\n"
+        f"{example}\n\n"
+        f"CRITICAL: Output ONLY the JSON object. No markdown, no explanation, no schema — just the data."
     )
     log.debug("Gemini structured [%s] (%s)", model, schema.__name__)
     try:
@@ -247,7 +287,14 @@ async def generate_structured(
         )
         text = _extract_text(data)
         log.debug("Gemini structured response: %s", text[:500])
-        return schema.model_validate(json.loads(text))
+        raw = json.loads(text)
+        if "properties" in raw and "type" in raw.get("properties", {}).get(list(raw["properties"].keys())[0], {}):
+            log.warning("Gemini returned schema instead of data, extracting defaults")
+            flat = {}
+            for k, v in raw["properties"].items():
+                flat[k] = v.get("default", v.get("type", ""))
+            raw = flat
+        return schema.model_validate(raw)
     except GeminiError:
         raise
     except Exception as e:
