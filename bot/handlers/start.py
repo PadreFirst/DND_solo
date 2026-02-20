@@ -199,7 +199,13 @@ async def on_char_review(cb: CallbackQuery, db: AsyncSession) -> None:
                                "personality": mission.first_npc_personality}]
         gs.turn_number = 1
 
-        opening = md_to_html(mission.opening_scene)
+        opening = md_to_html(mission.opening_scene) if mission.opening_scene else ""
+        if not opening.strip():
+            opening = (
+                f"<b>{mission.quest_title}</b>\n\n"
+                f"{md_to_html(mission.quest_description)}\n\n"
+                f"📍 <i>{mission.starting_location}</i>"
+            )
         gs.append_message("assistant", opening)
         user.onboarding_state = OnboardingState.PLAYING
 
@@ -213,8 +219,9 @@ async def on_char_review(cb: CallbackQuery, db: AsyncSession) -> None:
         log.exception("Mission generation failed")
         user.onboarding_state = OnboardingState.CHAR_REVIEW
         sheet = format_character_sheet(char)
+        backstory_html = md_to_html(char.backstory) if char.backstory else ""
         await cb.message.answer(
-            t("CHAR_REVIEW", user.language, sheet=sheet, backstory=char.backstory),
+            t("CHAR_REVIEW", user.language, sheet=sheet, backstory=backstory_html),
             parse_mode="HTML",
             reply_markup=character_review_keyboard(user.language),
         )
@@ -334,8 +341,12 @@ async def _generate_char(message: Message, user: User, description: str, db: Asy
         user.onboarding_state = OnboardingState.CHAR_REVIEW
 
         sheet = format_character_sheet(char)
+        backstory = md_to_html(char.backstory) if char.backstory else (
+            "<i>Тайна, скрытая даже от самого героя...</i>" if user.language == "ru"
+            else "<i>A mystery, hidden even from the hero themselves...</i>"
+        )
         await message.answer(
-            t("CHAR_REVIEW", user.language, sheet=sheet, backstory=char.backstory),
+            t("CHAR_REVIEW", user.language, sheet=sheet, backstory=backstory),
             parse_mode="HTML",
             reply_markup=character_review_keyboard(user.language),
         )

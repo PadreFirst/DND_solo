@@ -21,7 +21,8 @@ router = Router(name="inventory")
 async def cmd_inventory(message: Message, db: AsyncSession) -> None:
     user = await get_or_create_user(message.from_user.id, message.from_user.username, db)
     if user.onboarding_state != OnboardingState.PLAYING or not user.character:
-        await message.answer("Start a game first with /start")
+        hint = "Сначала начни игру: /start" if user.language == "ru" else "Start a game first with /start"
+        await message.answer(hint)
         return
     char = user.character
     text = format_inventory(char)
@@ -46,14 +47,22 @@ async def on_inv_select(cb: CallbackQuery, db: AsyncSession) -> None:
     weight = item.get("weight", 0)
     qty = item.get("quantity", 1)
 
-    text = (
-        f"🔍 <b>{name}</b>\n"
-        f"Quantity: {qty}\n"
-        f"Weight: {weight} lb\n"
-        f"<i>{desc}</i>"
-    )
+    if user.language == "ru":
+        text = (
+            f"🔍 <b>{name}</b>\n"
+            f"Количество: {qty}\n"
+            f"Вес: {weight} фн.\n"
+            f"<i>{desc}</i>"
+        )
+    else:
+        text = (
+            f"🔍 <b>{name}</b>\n"
+            f"Quantity: {qty}\n"
+            f"Weight: {weight} lb\n"
+            f"<i>{desc}</i>"
+        )
     await cb.message.edit_text(text, parse_mode="HTML",
-                               reply_markup=inventory_item_keyboard(idx))
+                               reply_markup=inventory_item_keyboard(idx, user.language))
     await cb.answer()
 
 
@@ -72,10 +81,15 @@ async def on_inv_use(cb: CallbackQuery, db: AsyncSession) -> None:
     name = item.get("name", "???")
 
     from bot.handlers.game import _process_player_action
-    await cb.answer(f"Using {name}...")
+    if user.language == "ru":
+        await cb.answer(f"Использую {name}...")
+        action_text = f"Я использую {name} из инвентаря"
+    else:
+        await cb.answer(f"Using {name}...")
+        action_text = f"I use {name} from my inventory"
     await _process_player_action(
         cb.message, cb.from_user.id, cb.from_user.username,
-        f"I use {name} from my inventory", db
+        action_text, db
     )
 
 
@@ -93,7 +107,9 @@ async def on_inv_drop(cb: CallbackQuery, db: AsyncSession) -> None:
     dropped = inv.pop(idx)
     char.inventory = inv
 
-    await cb.answer(f"Dropped {dropped.get('name', '???')}")
+    name = dropped.get("name", "???")
+    msg = f"Выброшено: {name}" if user.language == "ru" else f"Dropped {name}"
+    await cb.answer(msg)
     text = format_inventory(char)
     kb = inventory_list_keyboard(char.inventory) if char.inventory else None
     await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
@@ -114,10 +130,15 @@ async def on_inv_inspect(cb: CallbackQuery, db: AsyncSession) -> None:
     name = item.get("name", "???")
 
     from bot.handlers.game import _process_player_action
-    await cb.answer(f"Inspecting {name}...")
+    if user.language == "ru":
+        await cb.answer(f"Изучаю {name}...")
+        action_text = f"Я внимательно осматриваю {name} из инвентаря"
+    else:
+        await cb.answer(f"Inspecting {name}...")
+        action_text = f"I carefully inspect and examine {name} from my inventory"
     await _process_player_action(
         cb.message, cb.from_user.id, cb.from_user.username,
-        f"I carefully inspect and examine {name} from my inventory", db
+        action_text, db
     )
 
 

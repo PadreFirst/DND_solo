@@ -18,7 +18,7 @@ sleep 1
 
 echo "[2/6] Pulling latest code..."
 git fetch origin
-git reset --hard origin/main
+git reset --hard origin/master
 
 echo "[3/6] Installing dependencies..."
 pip install -r requirements.txt -q

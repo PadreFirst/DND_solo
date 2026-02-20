@@ -256,15 +256,60 @@ def _make_example(schema: type[BaseModel]) -> str:
     return json.dumps(example, indent=2, ensure_ascii=False)
 
 
+def _strip_code_fences(text: str) -> str:
+    """Remove markdown code fences that Gemini sometimes adds despite JSON mode."""
+    text = text.strip()
+    if text.startswith("```"):
+        first_nl = text.find("\n")
+        if first_nl != -1:
+            text = text[first_nl + 1:]
+        if text.endswith("```"):
+            text = text[:-3]
+    return text.strip()
+
+
+def _get_origin_type(field) -> str:
+    """Extract the base type from a field annotation for safe matching."""
+    import typing
+    ann = field.annotation
+    origin = getattr(ann, "__origin__", None)
+    if origin is list:
+        return "list"
+    if ann is int:
+        return "int"
+    if ann is float:
+        return "float"
+    if ann is bool:
+        return "bool"
+    if ann is str:
+        return "str"
+    ann_str = str(ann)
+    if ann_str.startswith("list[") or ann_str.startswith("typing.List["):
+        return "list"
+    return ann_str
+
+
 def _coerce_types(raw: dict, schema: type[BaseModel]) -> dict:
     """Best-effort type coercion so Gemini's sloppy JSON doesn't fail validation."""
     hints = schema.model_fields
     for key, field in hints.items():
-        if key not in raw:
+        if key not in raw or raw[key] is None:
+            if key in raw and raw[key] is None:
+                origin = _get_origin_type(field)
+                if origin == "list":
+                    raw[key] = []
+                elif origin == "str":
+                    raw[key] = ""
+                elif origin == "int":
+                    raw[key] = 0
+                elif origin == "float":
+                    raw[key] = 0.0
+                elif origin == "bool":
+                    raw[key] = False
             continue
         val = raw[key]
-        ann = str(field.annotation)
-        if "list" in ann and isinstance(val, str):
+        origin = _get_origin_type(field)
+        if origin == "list" and isinstance(val, str):
             val = val.strip()
             if val.startswith("["):
                 try:
@@ -275,19 +320,21 @@ def _coerce_types(raw: dict, schema: type[BaseModel]) -> dict:
                 raw[key] = [s.strip() for s in val.split(",")]
             else:
                 raw[key] = []
-        elif "int" in ann and isinstance(val, str):
+        elif origin == "int" and isinstance(val, str):
             try:
                 raw[key] = int(float(val)) if val.replace(".", "").replace("-", "").isdigit() else 0
             except (ValueError, TypeError):
                 raw[key] = 0
-        elif "float" in ann and isinstance(val, str):
+        elif origin == "int" and isinstance(val, float):
+            raw[key] = int(val)
+        elif origin == "float" and isinstance(val, str):
             try:
                 raw[key] = float(val)
             except (ValueError, TypeError):
                 raw[key] = 0.0
-        elif "bool" in ann and isinstance(val, str):
+        elif origin == "bool" and isinstance(val, str):
             raw[key] = val.lower() in ("true", "1", "yes")
-        elif "str" in ann and not isinstance(val, str):
+        elif origin == "str" and not isinstance(val, str):
             raw[key] = str(val) if val is not None else ""
     return raw
 
@@ -321,6 +368,7 @@ async def generate_structured(
         )
         text = _extract_text(data)
         log.debug("Gemini structured response: %s", text[:500])
+        text = _strip_code_fences(text)
         raw = json.loads(text)
         if "properties" in raw and isinstance(raw.get("properties"), dict):
             first_val = next(iter(raw["properties"].values()), {})

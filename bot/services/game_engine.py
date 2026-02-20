@@ -303,11 +303,11 @@ def build_full_character(
     char.death_save_failures = 0
 
 
-def short_rest(char: Character) -> str:
+def short_rest(char: Character, lang: str = "en") -> str:
     if char.current_hp >= char.max_hp:
-        return "HP already full."
+        return "HP уже максимальное." if lang == "ru" else "HP already full."
     if char.hit_dice_current <= 0:
-        return "No hit dice remaining."
+        return "Нет кубиков хитов." if lang == "ru" else "No hit dice remaining."
 
     die_face = char.hit_dice_face or "d8"
     result = roll(die_face, modifier=char.con_mod, reason="short rest")
@@ -316,10 +316,12 @@ def short_rest(char: Character) -> str:
     char.current_hp = min(char.max_hp, char.current_hp + heal)
     char.hit_dice_current = max(0, char.hit_dice_current - 1)
     healed = char.current_hp - old_hp
+    if lang == "ru":
+        return f"Короткий отдых: +{healed} HP ({result.display}). Кубики хитов: {char.hit_dice_current}/{char.hit_dice_max}"
     return f"Short rest: healed {healed} HP ({result.display}). Hit Dice: {char.hit_dice_current}/{char.hit_dice_max}"
 
 
-def long_rest(char: Character) -> str:
+def long_rest(char: Character, lang: str = "en") -> str:
     old_hp = char.current_hp
     char.current_hp = char.max_hp
     healed = char.current_hp - old_hp
@@ -337,6 +339,8 @@ def long_rest(char: Character) -> str:
     char.death_save_successes = 0
     char.death_save_failures = 0
 
+    if lang == "ru":
+        return f"Длинный отдых: HP {char.current_hp}/{char.max_hp} (+{healed}). Кубики хитов: {char.hit_dice_current}/{char.hit_dice_max}. Слоты заклинаний восстановлены."
     return f"Long rest: HP {char.current_hp}/{char.max_hp} (+{healed}). Hit Dice: {char.hit_dice_current}/{char.hit_dice_max}. Spell slots restored."
 
 
@@ -486,6 +490,22 @@ def make_attack(
     )
 
 
+def _resolve_skill_ability(skill_name: str) -> str:
+    """Look up the governing ability for a skill, supporting both EN and RU names."""
+    if skill_name in SKILL_ABILITY_MAP:
+        return SKILL_ABILITY_MAP[skill_name]
+    if skill_name in SKILL_ABILITY_MAP_RU:
+        return SKILL_ABILITY_MAP_RU[skill_name]
+    low = skill_name.lower()
+    for k, v in SKILL_ABILITY_MAP.items():
+        if k.lower() == low:
+            return v
+    for k, v in SKILL_ABILITY_MAP_RU.items():
+        if k.lower() == low:
+            return v
+    return "wisdom"
+
+
 def skill_check(
     char: Character,
     skill_name: str,
@@ -493,7 +513,7 @@ def skill_check(
     advantage: bool = False,
     disadvantage: bool = False,
 ) -> SkillCheckResult:
-    ability_name = SKILL_ABILITY_MAP.get(skill_name, "wisdom")
+    ability_name = _resolve_skill_ability(skill_name)
     ability_score = getattr(char, ability_name, 10)
     mod = char.ability_modifier(ability_score)
     if skill_name in char.proficient_skills:

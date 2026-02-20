@@ -8,11 +8,25 @@ from bot.services.game_engine import XP_THRESHOLDS
 
 
 def md_to_html(text: str) -> str:
-    """Convert markdown bold/italic to HTML tags for Telegram."""
+    """Convert markdown bold/italic to HTML tags for Telegram.
+
+    Also strips unsupported HTML tags to prevent parse errors.
+    """
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'__(.+?)__', r'<b>\1</b>', text)
     text = re.sub(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'<i>\1</i>', text)
     text = re.sub(r'(?<!_)_(?!_)(.+?)(?<!_)_(?!_)', r'<i>\1</i>', text)
+    text = re.sub(r'```[\s\S]*?```', '', text)
+    text = re.sub(r'`(.+?)`', r'<code>\1</code>', text)
+    text = re.sub(r'^#{1,6}\s+(.+)$', r'<b>\1</b>', text, flags=re.MULTILINE)
+    _allowed = {"b", "i", "u", "s", "code", "pre", "blockquote", "a"}
+    def _filter_tag(m: re.Match) -> str:
+        tag_content = m.group(1)
+        tag_name = tag_content.split()[0].strip("/").lower()
+        if tag_name in _allowed:
+            return m.group(0)
+        return ""
+    text = re.sub(r'<(/?\w[^>]*)>', _filter_tag, text)
     return text
 
 
@@ -135,4 +149,14 @@ def truncate_for_telegram(text: str, max_length: int = 4000) -> str:
     """Telegram messages max out at 4096 chars. Leave room for formatting."""
     if len(text) <= max_length:
         return text
-    return text[:max_length - 3] + "..."
+    cut = text[:max_length - 20]
+    open_tag = cut.rfind("<")
+    close_tag = cut.rfind(">")
+    if open_tag > close_tag:
+        cut = cut[:open_tag]
+    for tag in ("b", "i", "u", "s", "code", "pre", "blockquote"):
+        opens = cut.count(f"<{tag}>") + cut.count(f"<{tag} ")
+        closes = cut.count(f"</{tag}>")
+        for _ in range(opens - closes):
+            cut += f"</{tag}>"
+    return cut + "..."

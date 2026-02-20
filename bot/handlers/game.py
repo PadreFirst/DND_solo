@@ -32,6 +32,12 @@ log = logging.getLogger(__name__)
 router = Router(name="game")
 
 
+def _default_actions(lang: str) -> list[str]:
+    if lang == "ru":
+        return ["Осмотреться", "Поговорить", "Исследовать", "Проверить инвентарь"]
+    return ["Look around", "Talk to someone", "Explore", "Check inventory"]
+
+
 async def _typing(event: Message | CallbackQuery) -> None:
     chat_id = event.chat.id if isinstance(event, Message) else event.message.chat.id
     bot = event.bot if isinstance(event, Message) else event.message.bot
@@ -90,9 +96,7 @@ async def on_game_menu(cb: CallbackQuery, db: AsyncSession) -> None:
         return
 
     if action == "close":
-        gs = await ensure_session(user, db)
-        recent = gs.get_recent_messages(1)
-        last_actions = ["Look around", "Talk", "Explore", "Check inventory"]
+        last_actions = _default_actions(user.language)
         await cb.message.edit_reply_markup(
             reply_markup=actions_keyboard(last_actions, user.language)
         )
@@ -136,14 +140,14 @@ async def on_game_menu(cb: CallbackQuery, db: AsyncSession) -> None:
 
     if action == "short_rest":
         char = await ensure_character(user, db)
-        result = engine.short_rest(char)
+        result = engine.short_rest(char, lang=user.language)
         await cb.message.answer(f"☀️ {result}", parse_mode="HTML")
         await cb.answer()
         return
 
     if action == "long_rest":
         char = await ensure_character(user, db)
-        result = engine.long_rest(char)
+        result = engine.long_rest(char, lang=user.language)
         await cb.message.answer(f"🌙 {result}", parse_mode="HTML")
         await cb.answer()
         return
@@ -344,10 +348,13 @@ async def _process_player_action(
     narrative = md_to_html(narrative)
     gs.append_message("assistant", narrative)
 
-    if decision.important_event:
-        await save_episodic_memory(user.id, "event", decision.important_event, 7, db)
-    await maybe_summarize(gs, user.content_tier.value)
-    await maybe_run_deep_analysis(user, gs, db)
+    try:
+        if decision.important_event:
+            await save_episodic_memory(user.id, "event", decision.important_event, 7, db)
+        await maybe_summarize(gs, user.content_tier.value)
+        await maybe_run_deep_analysis(user, gs, db)
+    except Exception:
+        log.exception("Post-turn processing failed (non-fatal)")
 
     # --- Response ---
     parts: list[str] = []
@@ -364,8 +371,9 @@ async def _process_player_action(
     elapsed = int((time.monotonic() - start_time) * 1000)
     log.info("Turn %d user %d: %dms", gs.turn_number, user.telegram_id, elapsed)
 
+    final_actions = decision.available_actions if decision.available_actions else _default_actions(user.language)
     await reply_target.answer(
         truncate_for_telegram("\n\n".join(parts)),
         parse_mode="HTML",
-        reply_markup=actions_keyboard(decision.available_actions, user.language),
+        reply_markup=actions_keyboard(final_actions, user.language),
     )
