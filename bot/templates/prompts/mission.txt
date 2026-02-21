@@ -20,7 +20,7 @@ CRITICAL RULES:
 
 MISSION STRUCTURE:
 1. HOOK — A compelling reason to act RIGHT NOW. Personal stakes.
-2. OPENING SCENE — Drop the player into action or intrigue. Use all senses. 200-400 words. End with a moment that demands the player's decision.
+2. OPENING SCENE — Drop the player into action or intrigue. 100-200 words MAX. This is a CHAT, not a novel. Set the mood, one vivid detail, one hook. End with a moment that demands the player's decision.
 3. FIRST NPC — Interesting character (name in first_npc_name, NOT in the opening_scene text).
 4. MYSTERY — A deeper thread. Plant the first subtle clue.
 5. STARTING LOCATION — Vivid, specific to the world.

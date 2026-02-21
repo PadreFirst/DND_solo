@@ -146,7 +146,10 @@ class NPCAction(BaseModel):
 class GameResponse(BaseModel):
     model_config = ConfigDict(coerce_numbers_to_str=True)
 
-    narrative: str = Field(default="", description="The story text describing what happens. 150-400 words. HTML tags only.")
+    narrative: str = Field(default="", description="Scene up to the moment of uncertainty. 80-150 words. HTML only.")
+    on_success: str = Field(default="", description="2-3 sentences: what happens if the check SUCCEEDS.")
+    on_failure: str = Field(default="", description="2-3 sentences: what happens if the check FAILS. Must have real consequences.")
+    has_dialogue: bool = Field(default=False, description="True if an NPC is speaking and player can respond.")
     skill_checks: list[SkillCheckRequest] = Field(default_factory=list)
     saving_throws: list[SavingThrowRequest] = Field(default_factory=list)
     attack_target_ac: int = 0
@@ -469,7 +472,7 @@ async def generate_structured(
                 contents=[{"parts": [{"text": full_prompt}]}],
                 generation_config={
                     "responseMimeType": "application/json",
-                    "temperature": 0.7 if attempt == 0 else 0.4,
+                    "temperature": 0.5 if attempt == 0 else 0.3,
                     "maxOutputTokens": 4096,
                 },
                 safety_settings=SAFETY_OFF,

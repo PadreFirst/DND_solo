@@ -301,11 +301,14 @@ async def _process_player_action(
 
     # --- Execute mechanics ---
     mechanics_lines: list[str] = []
+    any_check_failed = False
 
     for sc in decision.skill_checks:
         try:
             r = engine.skill_check(char, sc.skill, sc.dc, sc.advantage, sc.disadvantage)
             mechanics_lines.append(r.display)
+            if not r.success:
+                any_check_failed = True
         except Exception:
             log.warning("Skill check failed: %s", sc.skill)
 
@@ -313,6 +316,8 @@ async def _process_player_action(
         try:
             r = engine.saving_throw(char, st.ability, st.dc, st.advantage, st.disadvantage)
             mechanics_lines.append(r.display)
+            if not r.success:
+                any_check_failed = True
         except Exception:
             log.warning("Saving throw failed: %s", st.ability)
 
@@ -371,8 +376,14 @@ async def _process_player_action(
     if decision.is_combat_end:
         gs.in_combat = False
 
-    # --- Build response ---
-    narrative = md_to_html(decision.narrative) if decision.narrative else "..."
+    # --- Build narrative from success/failure ---
+    base_narrative = decision.narrative or "..."
+    if any_check_failed and decision.on_failure:
+        base_narrative = f"{base_narrative}\n\n{decision.on_failure}"
+    elif not any_check_failed and decision.on_success:
+        base_narrative = f"{base_narrative}\n\n{decision.on_success}"
+
+    narrative = md_to_html(base_narrative)
     gs.append_message("assistant", narrative)
 
     try:
@@ -387,6 +398,12 @@ async def _process_player_action(
     if mechanics_lines:
         parts.append(f"<blockquote>{chr(10).join(mechanics_lines)}</blockquote>")
     parts.append(narrative)
+
+    if decision.has_dialogue:
+        hint = ("💬 <i>Выбери вариант или напечатай свой ответ</i>"
+                if user.language == "ru"
+                else "💬 <i>Pick an option or type your reply</i>")
+        parts.append(hint)
 
     if leveled_up:
         parts.append(t("LEVEL_UP", user.language, name=char.name, level=str(char.level),
