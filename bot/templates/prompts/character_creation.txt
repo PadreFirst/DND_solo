@@ -10,22 +10,22 @@ PLAYER'S CHARACTER CONCEPT:
 Name: {char_name}
 Description: {user_description}
 
-IMPORTANT: You provide ONLY the narrative/creative fields. The game engine will handle ALL mechanics (stats, HP, AC, inventory, gold) automatically via Standard Array and class rules. Do NOT output stats or inventory.
-
 YOUR TASK — fill these fields:
-1. race: Pick a race that fits the description (Human, Elf, Dwarf, Half-Orc, Tiefling, Halfling, Gnome, Dragonborn, Half-Elf, etc.)
+1. race: Pick a race that fits the description
 2. char_class: Pick ONE DnD class that best matches (Fighter, Wizard, Rogue, Cleric, Ranger, Paladin, Bard, Barbarian, Monk, Sorcerer, Warlock, Druid)
-3. proficient_skills: Choose 2-4 skills appropriate for the class and backstory
-4. backstory: Write 2-3 COMPELLING paragraphs that:
-   - Tie deeply into the WORLD SETTING
-   - Reflect the player's description
-   - Include hooks for adventure (unresolved conflicts, secrets, goals)
-   - Explain how the character learned their trade
-   - Match the NARRATIVE TONE
-5. personality_summary: 1-2 vivid sentences capturing the character's essence
+3. proficient_skills: 2-4 real DnD skills matching the character
+4. backstory: 2-3 paragraphs tying into the WORLD SETTING, matching the TONE, with hooks for adventure
+5. personality_summary: 1-2 vivid sentences
+6. suggested_inventory: 8-12 STARTING ITEMS that make sense for THIS character in THIS world.
 
-CRITICAL RULES:
-- backstory MUST be 2-3 paragraphs, never empty or one sentence
-- Race and class MUST match the player's concept, not generic defaults
-- proficient_skills must be real DnD skills (Acrobatics, Stealth, Perception, etc.)
-- Write everything in {language}
+INVENTORY RULES — CRITICAL:
+- Items MUST fit the WORLD SETTING. Modern world = modern items (phone, car keys, pistol, wallet, jacket). Fantasy = swords, armor, potions.
+- Include: 1-2 weapons, 1 armor/clothing, personal items (phone/keys/wallet if modern), tools of the trade, 1-2 consumables or supplies.
+- For each item set: name (in {language}), type (weapon/armor/ammo/consumable/misc), description (brief), equipped (true for worn/carried items).
+- Be SPECIFIC to the character: a hacker gets a laptop, a detective gets a magnifying glass, a street thug gets brass knuckles.
+- Think: what would this person ACTUALLY have in their pockets/bag right now?
+
+The game engine handles ALL mechanics (stats, HP, AC, damage dice, gold) automatically. Do NOT output stats.
+
+CRITICAL: backstory MUST be 2-3 paragraphs, never empty.
+Write everything in {language}.

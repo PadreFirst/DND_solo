@@ -171,15 +171,38 @@ def _trim_callback(prefix: str, text: str) -> str:
     return prefix + trimmed
 
 
-def actions_keyboard(actions: list[str], lang: str = "en") -> InlineKeyboardMarkup:
+_STYLE_MAP = {
+    "combat": ("danger", "⚔️"),
+    "dialogue": ("primary", "💬"),
+    "explore": (None, "🔍"),
+    "safe": ("success", "🛡"),
+}
+
+
+def actions_keyboard(
+    actions: list[str],
+    lang: str = "en",
+    styles: list[str] | None = None,
+) -> InlineKeyboardMarkup:
     buttons = []
-    for action in actions[:5]:
+    for i, action in enumerate(actions[:5]):
         label = _clean_action(action)
         if not label:
             continue
-        buttons.append([InlineKeyboardButton(
-            text=label, callback_data=_trim_callback("act:", label),
-        )])
+
+        style_key = styles[i] if styles and i < len(styles) else None
+        tg_style, emoji = _STYLE_MAP.get(style_key or "", (None, ""))
+        display = f"{emoji} {label}" if emoji else label
+
+        btn_kwargs = {
+            "text": display,
+            "callback_data": _trim_callback("act:", label),
+        }
+        if tg_style:
+            btn_kwargs["style"] = tg_style
+
+        buttons.append([InlineKeyboardButton(**btn_kwargs)])
+
     menu_label = "📋 Меню" if lang == "ru" else "📋 Menu"
     buttons.append([InlineKeyboardButton(text=menu_label, callback_data="gamemenu:open")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)

@@ -48,6 +48,13 @@ def apply_proposal(char: Character, proposal: CharacterProposal, genre: str = ""
     """
     char.name = proposal.name or char.name or "Unnamed"
 
+    ai_items = None
+    if hasattr(proposal, "suggested_inventory") and proposal.suggested_inventory:
+        ai_items = [
+            {"name": it.name, "type": it.type, "description": it.description, "equipped": it.equipped}
+            for it in proposal.suggested_inventory if it.name
+        ]
+
     try:
         build_full_character(
             char,
@@ -57,6 +64,7 @@ def apply_proposal(char: Character, proposal: CharacterProposal, genre: str = ""
             proficient_skills=proposal.proficient_skills if isinstance(proposal.proficient_skills, list) else [],
             personality=proposal.personality_summary or "",
             genre=genre,
+            ai_inventory=ai_items if ai_items else None,
         )
     except Exception:
         log.exception("build_full_character failed, applying safe defaults")

@@ -163,6 +163,7 @@ class GameResponse(BaseModel):
     location_change: str = ""
     quest_update: str = ""
     available_actions: list[str] = Field(default_factory=list)
+    action_styles: list[str] = Field(default_factory=list, description="Style per action: 'combat','dialogue','explore','safe'. Same order as available_actions.")
     is_combat_start: bool = False
     is_combat_end: bool = False
     important_event: str = ""
@@ -171,14 +172,22 @@ class GameResponse(BaseModel):
 MechanicsDecision = GameResponse
 
 
+class InventoryItem(BaseModel):
+    name: str = ""
+    type: str = Field(default="misc", description="weapon, armor, ammo, consumable, misc")
+    description: str = ""
+    equipped: bool = False
+
+
 class CharacterProposal(BaseModel):
-    """AI only fills narrative fields. Stats, HP, AC, inventory are computed in code."""
+    """AI fills narrative fields + suggests inventory. Stats, HP, AC computed in code."""
     name: str = ""
     race: str = Field(default="Human", description="Character race: Human, Elf, Dwarf, etc.")
     char_class: str = Field(default="Fighter", description="DnD class: Fighter, Wizard, Rogue, Cleric, etc.")
     proficient_skills: list[str] = Field(default_factory=list, description="2-4 skill proficiencies")
     backstory: str = Field(default="", description="2-3 paragraph backstory matching the world")
     personality_summary: str = Field(default="", description="Short personality description")
+    suggested_inventory: list[InventoryItem] = Field(default_factory=list, description="8-12 setting-appropriate starting items")
 
 
 class MissionProposal(BaseModel):

@@ -254,8 +254,89 @@ MODERN_STARTING_EQUIPMENT: dict[str, list[dict]] = {
 }
 
 
-def generate_starting_inventory(char_class: str, genre: str = "") -> list[dict]:
+_WEAPON_DAMAGE = {
+    "longsword": "1d8 slashing", "shortsword": "1d6 piercing", "dagger": "1d4 piercing",
+    "greataxe": "1d12 slashing", "greatsword": "2d6 slashing", "mace": "1d6 bludgeoning",
+    "quarterstaff": "1d6 bludgeoning", "rapier": "1d8 piercing", "handaxe": "1d6 slashing",
+    "shortbow": "1d6 piercing", "longbow": "1d8 piercing", "light crossbow": "1d8 piercing",
+    "hand crossbow": "1d6 piercing", "javelin": "1d6 piercing", "spear": "1d6 piercing",
+    "warhammer": "1d8 bludgeoning", "battleaxe": "1d8 slashing", "flail": "1d8 bludgeoning",
+    "pistol": "2d6 piercing", "пистолет": "2d6 piercing", "револьвер": "2d8 piercing",
+    "дробовик": "2d8 piercing", "shotgun": "2d8 piercing", "rifle": "2d10 piercing",
+    "нож": "1d4 piercing", "кинжал": "1d4 piercing", "knife": "1d4 piercing",
+    "бита": "1d6 bludgeoning", "кастет": "1d4 bludgeoning", "шокер": "1d4 lightning",
+    "меч": "1d8 slashing", "топор": "1d8 slashing", "булава": "1d6 bludgeoning",
+    "лук": "1d6 piercing", "арбалет": "1d8 piercing", "копьё": "1d6 piercing",
+}
+
+_ARMOR_AC = {
+    "leather armor": (11, "light"), "padded armor": (11, "light"), "studded leather": (12, "light"),
+    "hide armor": (12, "medium"), "chain shirt": (13, "medium"), "scale mail": (14, "medium"),
+    "breastplate": (14, "medium"), "half plate": (15, "medium"),
+    "ring mail": (14, "heavy"), "chain mail": (16, "heavy"), "splint": (17, "heavy"), "plate": (18, "heavy"),
+    "shield": (2, "shield"),
+    "кожаная броня": (11, "light"), "кожаная куртка": (11, "light"), "кожанка": (11, "light"),
+    "куртка": (11, "light"), "бронежилет": (14, "medium"), "кевлар": (14, "medium"),
+    "тактический жилет": (13, "medium"), "плащ": (10, "light"), "пальто": (10, "light"),
+    "толстовка": (10, "light"), "robes": (10, "light"),
+}
+
+
+def _normalize_ai_item(item_data: dict) -> dict:
+    """Convert an AI-suggested item into a proper game item with mechanics."""
+    name = item_data.get("name", "Unknown")
+    itype = item_data.get("type", "misc")
+    desc = item_data.get("description", "")
+    equipped = item_data.get("equipped", False)
+
+    result = {
+        "name": name, "type": itype, "description": desc,
+        "quantity": 1, "equipped": equipped,
+    }
+
+    name_low = name.lower()
+
+    if itype == "weapon":
+        damage_str = None
+        for pattern, dmg in _WEAPON_DAMAGE.items():
+            if pattern in name_low:
+                damage_str = dmg
+                break
+        if damage_str:
+            parts = damage_str.split(" ", 1)
+            result["mechanics"] = {"damage": parts[0], "type": parts[1] if len(parts) > 1 else "piercing"}
+        else:
+            result["mechanics"] = {"damage": "1d4", "type": "bludgeoning"}
+
+    elif itype == "armor":
+        ac_data = None
+        for pattern, data in _ARMOR_AC.items():
+            if pattern in name_low:
+                ac_data = data
+                break
+        if ac_data:
+            result["mechanics"] = {"ac": ac_data[0], "type": ac_data[1]}
+        else:
+            result["mechanics"] = {"ac": 10, "type": "light"}
+
+    elif itype == "ammo":
+        result["quantity"] = 20
+
+    return result
+
+
+def normalize_ai_inventory(ai_items: list[dict]) -> list[dict]:
+    """Convert a list of AI-suggested items into proper game items."""
+    normalized = []
+    for item in ai_items:
+        normalized.append(_normalize_ai_item(item))
+    return ensure_ammo(normalized)
+
+
+def generate_starting_inventory(char_class: str, genre: str = "", ai_items: list[dict] | None = None) -> list[dict]:
     import copy
+    if ai_items:
+        return normalize_ai_inventory(ai_items)
     if genre and _is_modern_setting(genre):
         items = MODERN_STARTING_EQUIPMENT.get(char_class, MODERN_STARTING_EQUIPMENT.get("Fighter", []))
         if items:
@@ -310,6 +391,7 @@ def build_full_character(
     proficient_skills: list[str] | None = None,
     personality: str = "",
     genre: str = "",
+    ai_inventory: list[dict] | None = None,
 ) -> None:
     """Apply all deterministic mechanics to a character after AI provides narrative fields."""
     canon_class = normalize_class_name(char_class)
@@ -338,7 +420,7 @@ def build_full_character(
         char.proficient_skills = []
 
     char.backstory = backstory
-    char.inventory = generate_starting_inventory(canon_class, genre=genre)
+    char.inventory = generate_starting_inventory(canon_class, genre=genre, ai_items=ai_inventory)
     char.armor_class = calculate_ac(char)
     char.initiative_bonus = char.dex_mod
     char.speed = 30

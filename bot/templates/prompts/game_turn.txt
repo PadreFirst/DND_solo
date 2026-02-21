@@ -39,7 +39,14 @@ EVEN IN A CHASE: don't roll every turn. Roll only for the ONE critical maneuver 
 Set to true if an NPC is speaking and the player could respond with words.
 
 === AVAILABLE ACTIONS ===
-4-5 actions in {language}. SPECIFIC to this exact moment. 3-8 words each.
+4-5 actions in "available_actions". SPECIFIC to this exact moment. 3-8 words each.
 If NPC just spoke: at least 2 actions should be dialogue responses.
+Do NOT include HTML tags or skill names in brackets in actions. Plain text only.
+
+For each action, also provide a style tag in "action_styles" (same order):
+- "combat" — attack, fight, threaten, use weapon
+- "dialogue" — speak, ask, persuade, negotiate, lie
+- "explore" — move, look, search, investigate, sneak
+- "safe" — rest, heal, retreat, accept offer, comply
 
 All text in {language}.

@@ -213,7 +213,7 @@ async def on_char_review(cb: CallbackQuery, db: AsyncSession) -> None:
         await cb.message.answer(
             t("GAME_START", user.language, opening_scene=truncate_for_telegram(opening, 3500)),
             parse_mode="HTML",
-            reply_markup=actions_keyboard(actions, user.language),
+            reply_markup=actions_keyboard(actions, user.language, styles=None),
         )
     except Exception as e:
         log.exception("Mission generation failed")
