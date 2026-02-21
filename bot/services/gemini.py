@@ -473,7 +473,7 @@ async def generate_structured(
                 generation_config={
                     "responseMimeType": "application/json",
                     "temperature": 0.5 if attempt == 0 else 0.3,
-                    "maxOutputTokens": 4096,
+                    "maxOutputTokens": 8192,
                 },
                 safety_settings=SAFETY_OFF,
             )
