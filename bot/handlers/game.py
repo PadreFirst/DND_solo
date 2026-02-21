@@ -286,6 +286,7 @@ async def _process_player_action(
         decision: GameResponse = await generate_structured(
             game_turn_prompt(full_context, player_action, language=user.language),
             GameResponse, content_tier=user.content_tier.value,
+            max_tokens=4096,
         )
     except Exception as e:
         stop_typing.set()
@@ -301,23 +302,30 @@ async def _process_player_action(
 
     # --- Execute mechanics ---
     mechanics_lines: list[str] = []
-    any_check_failed = False
+    any_succeeded = False
+    any_failed = False
+
+    lang = user.language
 
     for sc in decision.skill_checks:
         try:
             r = engine.skill_check(char, sc.skill, sc.dc, sc.advantage, sc.disadvantage)
-            mechanics_lines.append(r.display)
-            if not r.success:
-                any_check_failed = True
+            mechanics_lines.append(r.display_localized(lang))
+            if r.success:
+                any_succeeded = True
+            else:
+                any_failed = True
         except Exception:
             log.warning("Skill check failed: %s", sc.skill)
 
     for st in decision.saving_throws:
         try:
             r = engine.saving_throw(char, st.ability, st.dc, st.advantage, st.disadvantage)
-            mechanics_lines.append(r.display)
-            if not r.success:
-                any_check_failed = True
+            mechanics_lines.append(r.display_localized(lang))
+            if r.success:
+                any_succeeded = True
+            else:
+                any_failed = True
         except Exception:
             log.warning("Saving throw failed: %s", st.ability)
 
@@ -327,9 +335,11 @@ async def _process_player_action(
                 char, decision.attack_target_ac,
                 decision.attack_damage_dice or "1d8", decision.attack_ability or "strength", True,
             )
-            mechanics_lines.append(atk.display)
-            if not atk.hit:
-                any_check_failed = True
+            mechanics_lines.append(atk.display_localized(lang))
+            if atk.hit:
+                any_succeeded = True
+            else:
+                any_failed = True
         except Exception:
             log.warning("Attack failed: ac=%s dice=%s", decision.attack_target_ac, decision.attack_damage_dice)
 
@@ -381,9 +391,17 @@ async def _process_player_action(
 
     # --- Build narrative from success/failure ---
     base_narrative = decision.narrative or "..."
-    if any_check_failed and decision.on_failure:
+    if any_succeeded and any_failed:
+        extras = []
+        if decision.on_success:
+            extras.append(decision.on_success)
+        if decision.on_failure:
+            extras.append(decision.on_failure)
+        if extras:
+            base_narrative = f"{base_narrative}\n\n{' '.join(extras)}"
+    elif any_failed and decision.on_failure:
         base_narrative = f"{base_narrative}\n\n{decision.on_failure}"
-    elif not any_check_failed and decision.on_success:
+    elif any_succeeded and decision.on_success:
         base_narrative = f"{base_narrative}\n\n{decision.on_success}"
 
     narrative = md_to_html(base_narrative)

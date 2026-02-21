@@ -43,24 +43,34 @@ async def on_inv_select(cb: CallbackQuery, db: AsyncSession) -> None:
 
     item = inv[idx]
     name = item.get("name", "???")
-    desc = item.get("description", "No description")
-    weight = item.get("weight", 0)
+    desc = item.get("description", "")
     qty = item.get("quantity", 1)
+    itype = item.get("type", "misc")
+    mechanics = item.get("mechanics", {})
+    if isinstance(mechanics, str):
+        import json as _json
+        try:
+            mechanics = _json.loads(mechanics)
+        except Exception:
+            mechanics = {}
 
-    if user.language == "ru":
-        text = (
-            f"🔍 <b>{name}</b>\n"
-            f"Количество: {qty}\n"
-            f"Вес: {weight} фн.\n"
-            f"<i>{desc}</i>"
-        )
-    else:
-        text = (
-            f"🔍 <b>{name}</b>\n"
-            f"Quantity: {qty}\n"
-            f"Weight: {weight} lb\n"
-            f"<i>{desc}</i>"
-        )
+    lines = [f"🔍 <b>{name}</b>"]
+    if itype == "weapon" and mechanics:
+        dmg = mechanics.get("damage", "?")
+        dtype = mechanics.get("type", "")
+        lines.append(f"⚔️ Урон: <b>{dmg} {dtype}</b>" if user.language == "ru" else f"⚔️ Damage: <b>{dmg} {dtype}</b>")
+    elif itype == "armor" and mechanics:
+        ac = mechanics.get("ac", "?")
+        atype = mechanics.get("type", "")
+        lines.append(f"🛡 Защита: <b>AC {ac}</b> ({atype})" if user.language == "ru" else f"🛡 Defense: <b>AC {ac}</b> ({atype})")
+    if qty > 1:
+        lines.append(f"Количество: {qty}" if user.language == "ru" else f"Quantity: {qty}")
+    if item.get("equipped"):
+        lines.append("✅ Экипировано" if user.language == "ru" else "✅ Equipped")
+    if desc:
+        lines.append(f"<i>{desc}</i>")
+
+    text = "\n".join(lines)
     await cb.message.edit_text(text, parse_mode="HTML",
                                reply_markup=inventory_item_keyboard(idx, user.language))
     await cb.answer()

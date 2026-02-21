@@ -17,8 +17,8 @@ class Settings(BaseSettings):
     gemini_model_heavy: str = ""
     gemini_proxy: str = ""
 
-    max_recent_messages: int = 20
-    summarize_every_n: int = 25
+    max_recent_messages: int = 12
+    summarize_every_n: int = 15
     personalization_every_n: int = 10
 
 

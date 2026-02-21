@@ -536,19 +536,37 @@ class AttackResult:
     critical: bool
     target_ac: int = 0
 
-    @property
-    def display(self) -> str:
+    def display_localized(self, lang: str = "en") -> str:
         ac_info = f" vs AC {self.target_ac}" if self.target_ac else ""
         lines = [f"🎲 {self.attack_roll.display}{ac_info}"]
         if self.critical:
-            lines.append("💥 CRITICAL HIT!")
+            lines.append("💥 КРИТ!" if lang == "ru" else "💥 CRITICAL HIT!")
         elif self.hit:
-            lines.append("✅ Hit!")
+            lines.append("✅ Попадание!" if lang == "ru" else "✅ Hit!")
         else:
-            lines.append("❌ Miss!")
+            lines.append("❌ Промах!" if lang == "ru" else "❌ Miss!")
         if self.damage_roll:
-            lines.append(f"⚔️ Damage: {self.damage_roll.display}")
+            lines.append(f"⚔️ Урон: {self.damage_roll.display}" if lang == "ru" else f"⚔️ Damage: {self.damage_roll.display}")
         return "\n".join(lines)
+
+    @property
+    def display(self) -> str:
+        return self.display_localized("en")
+
+
+_SKILL_NAMES_RU = {
+    "Perception": "Восприятие", "Stealth": "Скрытность", "Athletics": "Атлетика",
+    "Acrobatics": "Акробатика", "Sleight of Hand": "Ловкость рук", "Arcana": "Магия",
+    "History": "История", "Investigation": "Расследование", "Nature": "Природа",
+    "Religion": "Религия", "Animal Handling": "Уход за животными", "Insight": "Проницательность",
+    "Medicine": "Медицина", "Survival": "Выживание", "Deception": "Обман",
+    "Intimidation": "Запугивание", "Performance": "Выступление", "Persuasion": "Убеждение",
+}
+
+_ABILITY_NAMES_RU = {
+    "strength": "Сила", "dexterity": "Ловкость", "constitution": "Телосложение",
+    "intelligence": "Интеллект", "wisdom": "Мудрость", "charisma": "Харизма",
+}
 
 
 @dataclass
@@ -558,10 +576,17 @@ class SkillCheckResult:
     success: bool
     skill_name: str
 
+    def display_localized(self, lang: str = "en") -> str:
+        name = _SKILL_NAMES_RU.get(self.skill_name, self.skill_name) if lang == "ru" else self.skill_name
+        if lang == "ru":
+            tag = "✅ Успех!" if self.success else "❌ Провал!"
+            return f"🎲 {name} (нужно {self.dc}+): {self.roll_result.display}\n{tag}"
+        tag = "✅ Success!" if self.success else "❌ Failure!"
+        return f"🎲 {name} (need {self.dc}+): {self.roll_result.display}\n{tag}"
+
     @property
     def display(self) -> str:
-        tag = "✅ Success!" if self.success else "❌ Failure!"
-        return f"🎲 {self.skill_name} check (DC {self.dc}): {self.roll_result.display}\n{tag}"
+        return self.display_localized("en")
 
 
 @dataclass
@@ -571,10 +596,17 @@ class SavingThrowResult:
     success: bool
     ability: str
 
+    def display_localized(self, lang: str = "en") -> str:
+        name = _ABILITY_NAMES_RU.get(self.ability, self.ability) if lang == "ru" else self.ability.capitalize()
+        if lang == "ru":
+            tag = "✅ Успех!" if self.success else "❌ Провал!"
+            return f"🎲 Спасбросок {name} (нужно {self.dc}+): {self.roll_result.display}\n{tag}"
+        tag = "✅ Success!" if self.success else "❌ Failure!"
+        return f"🎲 {name} save (need {self.dc}+): {self.roll_result.display}\n{tag}"
+
     @property
     def display(self) -> str:
-        tag = "✅ Success!" if self.success else "❌ Failure!"
-        return f"🎲 {self.ability} save (DC {self.dc}): {self.roll_result.display}\n{tag}"
+        return self.display_localized("en")
 
 
 @dataclass

@@ -34,16 +34,16 @@ _WORLDS = {
 def language_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang:ru"),
-            InlineKeyboardButton(text="🇬🇧 English", callback_data="lang:en"),
+            InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang:ru", style="primary"),
+            InlineKeyboardButton(text="🇬🇧 English", callback_data="lang:en", style="primary"),
         ],
         [
-            InlineKeyboardButton(text="🇪🇸 Español", callback_data="lang:es"),
-            InlineKeyboardButton(text="🇩🇪 Deutsch", callback_data="lang:de"),
+            InlineKeyboardButton(text="🇪🇸 Español", callback_data="lang:es", style="primary"),
+            InlineKeyboardButton(text="🇩🇪 Deutsch", callback_data="lang:de", style="primary"),
         ],
         [
-            InlineKeyboardButton(text="🇫🇷 Français", callback_data="lang:fr"),
-            InlineKeyboardButton(text="🇨🇳 中文", callback_data="lang:zh"),
+            InlineKeyboardButton(text="🇫🇷 Français", callback_data="lang:fr", style="primary"),
+            InlineKeyboardButton(text="🇨🇳 中文", callback_data="lang:zh", style="primary"),
         ],
     ])
 
@@ -125,24 +125,24 @@ def tone_keyboard(lang: str) -> InlineKeyboardMarkup:
 def char_creation_method_keyboard(lang: str) -> InlineKeyboardMarkup:
     if lang == "ru":
         return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✍️ Описать свободно", callback_data="charmethod:free")],
-            [InlineKeyboardButton(text="❓ Ответить на вопросы", callback_data="charmethod:questions")],
+            [InlineKeyboardButton(text="✍️ Описать свободно", callback_data="charmethod:free", style="primary")],
+            [InlineKeyboardButton(text="❓ Ответить на вопросы", callback_data="charmethod:questions", style="primary")],
         ])
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✍️ Describe freely", callback_data="charmethod:free")],
-        [InlineKeyboardButton(text="❓ Answer questions", callback_data="charmethod:questions")],
+        [InlineKeyboardButton(text="✍️ Describe freely", callback_data="charmethod:free", style="primary")],
+        [InlineKeyboardButton(text="❓ Answer questions", callback_data="charmethod:questions", style="primary")],
     ])
 
 
 def character_review_keyboard(lang: str) -> InlineKeyboardMarkup:
     if lang == "ru":
         return InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="✅ Принять", callback_data="charreview:accept"),
-            InlineKeyboardButton(text="🔄 Заново", callback_data="charreview:regen"),
+            InlineKeyboardButton(text="✅ Принять", callback_data="charreview:accept", style="success"),
+            InlineKeyboardButton(text="🔄 Заново", callback_data="charreview:regen", style="danger"),
         ]])
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ Accept", callback_data="charreview:accept"),
-        InlineKeyboardButton(text="🔄 Regenerate", callback_data="charreview:regen"),
+        InlineKeyboardButton(text="✅ Accept", callback_data="charreview:accept", style="success"),
+        InlineKeyboardButton(text="🔄 Regenerate", callback_data="charreview:regen", style="danger"),
     ]])
 
 
@@ -185,22 +185,26 @@ def actions_keyboard(
     styles: list[str] | None = None,
 ) -> InlineKeyboardMarkup:
     menu_label = "📋 Меню" if lang == "ru" else "📋 Menu"
+    gm_label = "❓ ГМ" if lang == "ru" else "❓ GM"
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=menu_label, callback_data="gamemenu:open")],
+        [
+            InlineKeyboardButton(text=menu_label, callback_data="gamemenu:open", style="primary"),
+            InlineKeyboardButton(text=gm_label, callback_data="gamemenu:askgm", style="success"),
+        ],
     ])
 
 
 def rest_keyboard(lang: str) -> InlineKeyboardMarkup:
     if lang == "ru":
         return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="☀️ Короткий отдых", callback_data="gamemenu:short_rest")],
-            [InlineKeyboardButton(text="🌙 Длинный отдых", callback_data="gamemenu:long_rest")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="gamemenu:open")],
+            [InlineKeyboardButton(text="☀️ Короткий отдых", callback_data="gamemenu:short_rest", style="success")],
+            [InlineKeyboardButton(text="🌙 Длинный отдых", callback_data="gamemenu:long_rest", style="success")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="gamemenu:open", style="primary")],
         ])
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="☀️ Short Rest", callback_data="gamemenu:short_rest")],
-        [InlineKeyboardButton(text="🌙 Long Rest", callback_data="gamemenu:long_rest")],
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="gamemenu:open")],
+        [InlineKeyboardButton(text="☀️ Short Rest", callback_data="gamemenu:short_rest", style="success")],
+        [InlineKeyboardButton(text="🌙 Long Rest", callback_data="gamemenu:long_rest", style="success")],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="gamemenu:open", style="primary")],
     ])
 
 
@@ -208,39 +212,39 @@ def game_menu_keyboard(lang: str) -> InlineKeyboardMarkup:
     if lang == "ru":
         return InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text="📊 Персонаж", callback_data="gamemenu:stats"),
-                InlineKeyboardButton(text="🎒 Инвентарь", callback_data="gamemenu:inv"),
+                InlineKeyboardButton(text="📊 Персонаж", callback_data="gamemenu:stats", style="primary"),
+                InlineKeyboardButton(text="🎒 Инвентарь", callback_data="gamemenu:inv", style="primary"),
             ],
             [
-                InlineKeyboardButton(text="📜 Задание", callback_data="gamemenu:quest"),
-                InlineKeyboardButton(text="🗺 Локация", callback_data="gamemenu:location"),
+                InlineKeyboardButton(text="📜 Задание", callback_data="gamemenu:quest", style="primary"),
+                InlineKeyboardButton(text="🗺 Локация", callback_data="gamemenu:location", style="primary"),
             ],
             [
-                InlineKeyboardButton(text="🛏 Отдых", callback_data="gamemenu:rest"),
-                InlineKeyboardButton(text="🔎 Осмотр", callback_data="gamemenu:inspect"),
+                InlineKeyboardButton(text="🛏 Отдых", callback_data="gamemenu:rest", style="success"),
+                InlineKeyboardButton(text="🔎 Осмотр", callback_data="gamemenu:inspect", style="success"),
             ],
             [
-                InlineKeyboardButton(text="❓ Спросить ГМа", callback_data="gamemenu:askgm"),
-                InlineKeyboardButton(text="🔄 Новая игра", callback_data="gamemenu:newgame"),
+                InlineKeyboardButton(text="❓ Спросить ГМа", callback_data="gamemenu:askgm", style="success"),
+                InlineKeyboardButton(text="🔄 Новая игра", callback_data="gamemenu:newgame", style="danger"),
             ],
             [InlineKeyboardButton(text="⬅️ Назад к игре", callback_data="gamemenu:close")],
         ])
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="📊 Character", callback_data="gamemenu:stats"),
-            InlineKeyboardButton(text="🎒 Inventory", callback_data="gamemenu:inv"),
+            InlineKeyboardButton(text="📊 Character", callback_data="gamemenu:stats", style="primary"),
+            InlineKeyboardButton(text="🎒 Inventory", callback_data="gamemenu:inv", style="primary"),
         ],
         [
-            InlineKeyboardButton(text="📜 Quest", callback_data="gamemenu:quest"),
-            InlineKeyboardButton(text="🗺 Location", callback_data="gamemenu:location"),
+            InlineKeyboardButton(text="📜 Quest", callback_data="gamemenu:quest", style="primary"),
+            InlineKeyboardButton(text="🗺 Location", callback_data="gamemenu:location", style="primary"),
         ],
         [
-            InlineKeyboardButton(text="🛏 Rest", callback_data="gamemenu:rest"),
-            InlineKeyboardButton(text="🔎 Inspect", callback_data="gamemenu:inspect"),
+            InlineKeyboardButton(text="🛏 Rest", callback_data="gamemenu:rest", style="success"),
+            InlineKeyboardButton(text="🔎 Inspect", callback_data="gamemenu:inspect", style="success"),
         ],
         [
-            InlineKeyboardButton(text="❓ Ask GM", callback_data="gamemenu:askgm"),
-            InlineKeyboardButton(text="🔄 New game", callback_data="gamemenu:newgame"),
+            InlineKeyboardButton(text="❓ Ask GM", callback_data="gamemenu:askgm", style="success"),
+            InlineKeyboardButton(text="🔄 New game", callback_data="gamemenu:newgame", style="danger"),
         ],
         [InlineKeyboardButton(text="⬅️ Back to game", callback_data="gamemenu:close")],
     ])
@@ -250,17 +254,17 @@ def inventory_item_keyboard(item_index: int, lang: str = "en") -> InlineKeyboard
     if lang == "ru":
         return InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text="🔧 Использовать", callback_data=f"inv:use:{item_index}"),
-                InlineKeyboardButton(text="🗑 Выбросить", callback_data=f"inv:drop:{item_index}"),
+                InlineKeyboardButton(text="🔧 Использовать", callback_data=f"inv:use:{item_index}", style="success"),
+                InlineKeyboardButton(text="🗑 Выбросить", callback_data=f"inv:drop:{item_index}", style="danger"),
             ],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="inv:back")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="inv:back", style="primary")],
         ])
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🔧 Use", callback_data=f"inv:use:{item_index}"),
-            InlineKeyboardButton(text="🗑 Drop", callback_data=f"inv:drop:{item_index}"),
+            InlineKeyboardButton(text="🔧 Use", callback_data=f"inv:use:{item_index}", style="success"),
+            InlineKeyboardButton(text="🗑 Drop", callback_data=f"inv:drop:{item_index}", style="danger"),
         ],
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="inv:back")],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="inv:back", style="primary")],
     ])
 
 

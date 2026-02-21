@@ -462,6 +462,7 @@ async def generate_structured(
     schema: type[BaseModel],
     content_tier: str = "full",
     heavy: bool = False,
+    max_tokens: int = 8192,
 ) -> BaseModel:
     model = _pick_model(heavy)
     example = _make_example(schema)
@@ -482,7 +483,7 @@ async def generate_structured(
                 generation_config={
                     "responseMimeType": "application/json",
                     "temperature": 0.5 if attempt == 0 else 0.3,
-                    "maxOutputTokens": 8192,
+                    "maxOutputTokens": max_tokens,
                 },
                 safety_settings=SAFETY_OFF,
             )

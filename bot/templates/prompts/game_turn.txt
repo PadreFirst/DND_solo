@@ -12,8 +12,10 @@ One paragraph of action/description + one paragraph of dialogue (if any). That's
 
 === NARRATIVE STRUCTURE ===
 If there is ANY uncertain action (dice check, attack, saving throw): "narrative" = scene UP TO the uncertain moment. DO NOT describe whether the attack hits or the check succeeds. Stop BEFORE the outcome. Then fill:
-- "on_success": 2-3 sentences — bullet hits, lock opens, spell works, NPC is convinced.
-- "on_failure": 2-3 sentences — bullet misses, lock jams, spell fizzles, NPC gets angry. REAL consequences: HP loss, broken item, enemy advantage, wasted ammo.
+- "on_success": 2-3 sentences — what happens when checks SUCCEED. Perception → you notice the threat. Attack → bullet hits. Lock pick → opens.
+- "on_failure": 2-3 sentences — what happens when checks FAIL. Perception → threat goes unnoticed. Attack → miss. REAL consequences: HP loss, broken item, enemy advantage.
+
+IMPORTANT: If you request MULTIPLE checks, "on_success" describes ALL succeeding and "on_failure" describes ALL failing. The code handles mixed results automatically. Prefer requesting only ONE key check per turn.
 
 If there is NO uncertain action: write the full scene in "narrative". Leave on_success and on_failure empty.
 
