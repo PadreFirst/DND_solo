@@ -337,7 +337,7 @@ async def _generate_char(message: Message, user: User, description: str, db: Asy
             theme="adventure",
             language=user.language, content_tier=user.content_tier.value,
         )
-        apply_proposal(char, proposal)
+        apply_proposal(char, proposal, genre=world_desc)
         user.onboarding_state = OnboardingState.CHAR_REVIEW
 
         sheet = format_character_sheet(char)

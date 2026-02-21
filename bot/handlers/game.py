@@ -354,7 +354,8 @@ async def _process_player_action(
         ]
         for ic in decision.inventory_changes:
             prefix = "+" if ic.action != "remove" else "-"
-            mechanics_lines.append(f"🎒 {prefix}{ic.name}")
+            qty_str = f" x{ic.quantity}" if ic.quantity > 1 else ""
+            mechanics_lines.append(f"🎒 {prefix}{ic.quantity} {ic.name}" if ic.quantity != 1 else f"🎒 {prefix}{ic.name}")
         char.inventory = engine.merge_inventory(char.inventory, changes)
         char.inventory = engine.ensure_ammo(char.inventory)
 

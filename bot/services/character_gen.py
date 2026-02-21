@@ -40,7 +40,7 @@ async def generate_character(
     return proposal
 
 
-def apply_proposal(char: Character, proposal: CharacterProposal) -> None:
+def apply_proposal(char: Character, proposal: CharacterProposal, genre: str = "") -> None:
     """AI fills narrative fields; code computes all mechanics deterministically.
 
     Wrapped in a try/except so even if something goes wrong,
@@ -56,6 +56,7 @@ def apply_proposal(char: Character, proposal: CharacterProposal) -> None:
             backstory=proposal.backstory or "",
             proficient_skills=proposal.proficient_skills if isinstance(proposal.proficient_skills, list) else [],
             personality=proposal.personality_summary or "",
+            genre=genre,
         )
     except Exception:
         log.exception("build_full_character failed, applying safe defaults")

@@ -207,8 +207,59 @@ def distribute_stats(char_class: str) -> dict[str, int]:
     return stats
 
 
-def generate_starting_inventory(char_class: str) -> list[dict]:
+_MODERN_KEYWORDS = {"modern", "sci-fi", "scifi", "cyberpunk", "noir", "postapoc",
+                     "москв", "город", "современн", "urban", "city", "post-apoc",
+                     "технолог", "будущ", "future", "детектив", "detective"}
+
+
+def _is_modern_setting(genre: str) -> bool:
+    low = genre.lower()
+    return any(kw in low for kw in _MODERN_KEYWORDS)
+
+
+MODERN_STARTING_EQUIPMENT: dict[str, list[dict]] = {
+    "Fighter": [
+        {"name": "Боевой нож", "type": "weapon", "mechanics": {"damage": "1d6", "type": "piercing"}, "quantity": 1, "equipped": True},
+        {"name": "Пистолет (9мм)", "type": "weapon", "mechanics": {"damage": "2d6", "type": "piercing"}, "quantity": 1, "equipped": True},
+        {"name": "Патроны 9мм", "type": "ammo", "quantity": 15, "equipped": False},
+        {"name": "Бронежилет", "type": "armor", "mechanics": {"ac": 14, "type": "medium"}, "quantity": 1, "equipped": True},
+        {"name": "Телефон", "type": "misc", "description": "Смартфон", "quantity": 1, "equipped": True},
+        {"name": "Рюкзак", "type": "misc", "description": "Аптечка, фонарик, верёвка, перчатки", "quantity": 1, "equipped": False},
+    ],
+    "Rogue": [
+        {"name": "Выкидной нож", "type": "weapon", "mechanics": {"damage": "1d4", "type": "piercing"}, "quantity": 1, "equipped": True},
+        {"name": "Пистолет с глушителем", "type": "weapon", "mechanics": {"damage": "2d6", "type": "piercing"}, "quantity": 1, "equipped": False},
+        {"name": "Патроны 9мм", "type": "ammo", "quantity": 12, "equipped": False},
+        {"name": "Кожаная куртка", "type": "armor", "mechanics": {"ac": 11, "type": "light"}, "quantity": 1, "equipped": True},
+        {"name": "Набор отмычек", "type": "misc", "description": "Электронные и механические отмычки", "quantity": 1, "equipped": True},
+        {"name": "Телефон", "type": "misc", "description": "Смартфон с шифрованием", "quantity": 1, "equipped": True},
+        {"name": "Ключи от машины", "type": "misc", "description": "Audi A6", "quantity": 1, "equipped": True},
+        {"name": "Кошелёк", "type": "misc", "description": "Наличные, пара кредиток", "quantity": 1, "equipped": True},
+    ],
+    "Wizard": [
+        {"name": "Ноутбук", "type": "misc", "description": "Хакерский инструмент, зашифрован", "quantity": 1, "equipped": True},
+        {"name": "Телефон", "type": "misc", "description": "Смартфон", "quantity": 1, "equipped": True},
+        {"name": "Шокер", "type": "weapon", "mechanics": {"damage": "1d4", "type": "lightning"}, "quantity": 1, "equipped": True},
+        {"name": "Куртка с капюшоном", "type": "armor", "mechanics": {"ac": 10, "type": "light"}, "quantity": 1, "equipped": True},
+        {"name": "USB-флешки", "type": "misc", "description": "Набор с инструментами и эксплойтами", "quantity": 3, "equipped": False},
+        {"name": "Рюкзак", "type": "misc", "description": "Зарядка, кабели, наушники", "quantity": 1, "equipped": False},
+    ],
+    "Cleric": [
+        {"name": "Бита", "type": "weapon", "mechanics": {"damage": "1d6", "type": "bludgeoning"}, "quantity": 1, "equipped": True},
+        {"name": "Бронежилет", "type": "armor", "mechanics": {"ac": 14, "type": "medium"}, "quantity": 1, "equipped": True},
+        {"name": "Аптечка", "type": "misc", "description": "Профессиональная медицинская", "quantity": 1, "equipped": True},
+        {"name": "Телефон", "type": "misc", "description": "Смартфон", "quantity": 1, "equipped": True},
+        {"name": "Рюкзак", "type": "misc", "description": "Бинты, обезболивающее, антисептик", "quantity": 1, "equipped": False},
+    ],
+}
+
+
+def generate_starting_inventory(char_class: str, genre: str = "") -> list[dict]:
     import copy
+    if genre and _is_modern_setting(genre):
+        items = MODERN_STARTING_EQUIPMENT.get(char_class, MODERN_STARTING_EQUIPMENT.get("Fighter", []))
+        if items:
+            return copy.deepcopy(items)
     items = CLASS_STARTING_EQUIPMENT.get(char_class, CLASS_STARTING_EQUIPMENT["Fighter"])
     return copy.deepcopy(items)
 
@@ -258,6 +309,7 @@ def build_full_character(
     backstory: str = "",
     proficient_skills: list[str] | None = None,
     personality: str = "",
+    genre: str = "",
 ) -> None:
     """Apply all deterministic mechanics to a character after AI provides narrative fields."""
     canon_class = normalize_class_name(char_class)
@@ -286,7 +338,7 @@ def build_full_character(
         char.proficient_skills = []
 
     char.backstory = backstory
-    char.inventory = generate_starting_inventory(canon_class)
+    char.inventory = generate_starting_inventory(canon_class, genre=genre)
     char.armor_class = calculate_ac(char)
     char.initiative_bonus = char.dex_mod
     char.speed = 30
@@ -400,10 +452,12 @@ class AttackResult:
     hit: bool
     damage_roll: RollResult | None
     critical: bool
+    target_ac: int = 0
 
     @property
     def display(self) -> str:
-        lines = [f"🎲 {self.attack_roll.display}"]
+        ac_info = f" vs AC {self.target_ac}" if self.target_ac else ""
+        lines = [f"🎲 {self.attack_roll.display}{ac_info}"]
         if self.critical:
             lines.append("💥 CRITICAL HIT!")
         elif self.hit:
@@ -486,7 +540,8 @@ def make_attack(
         dmg_roll = roll(dice_to_roll, modifier=ability_mod, reason="damage")
 
     return AttackResult(
-        attack_roll=atk_roll, hit=hit, damage_roll=dmg_roll, critical=critical
+        attack_roll=atk_roll, hit=hit, damage_roll=dmg_roll, critical=critical,
+        target_ac=target_ac,
     )
 
 

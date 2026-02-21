@@ -146,6 +146,21 @@ def character_review_keyboard(lang: str) -> InlineKeyboardMarkup:
     ]])
 
 
+def _strip_html(text: str) -> str:
+    """Remove HTML tags from text."""
+    import re
+    return re.sub(r"<[^>]+>", "", text).strip()
+
+
+def _clean_action(text: str) -> str:
+    """Strip HTML, trim to reasonable button length."""
+    clean = _strip_html(text)
+    clean = clean.strip("«»\"'")
+    if len(clean) > 40:
+        clean = clean[:37] + "..."
+    return clean
+
+
 def _trim_callback(prefix: str, text: str) -> str:
     """Trim text so prefix+text fits in 64 bytes (Telegram callback_data limit)."""
     budget = 64 - len(prefix.encode("utf-8"))
@@ -159,8 +174,11 @@ def _trim_callback(prefix: str, text: str) -> str:
 def actions_keyboard(actions: list[str], lang: str = "en") -> InlineKeyboardMarkup:
     buttons = []
     for action in actions[:5]:
+        label = _clean_action(action)
+        if not label:
+            continue
         buttons.append([InlineKeyboardButton(
-            text=action, callback_data=_trim_callback("act:", action),
+            text=label, callback_data=_trim_callback("act:", label),
         )])
     menu_label = "📋 Меню" if lang == "ru" else "📋 Menu"
     buttons.append([InlineKeyboardButton(text=menu_label, callback_data="gamemenu:open")])
