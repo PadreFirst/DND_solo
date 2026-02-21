@@ -61,8 +61,10 @@ GAME_START = (
     "🎮 <b>The adventure begins!</b>\n\n"
     "{opening_scene}\n\n"
     "─────────────\n"
-    "💡 <i>Tap a button below or type your own action — "
-    "any text is accepted. 'Menu' for in-game commands.</i>"
+    "💡 <b>Just type what your character does.</b>\n"
+    "<i>Speak, act, explore — write anything. "
+    "'Menu' button for character sheet, inventory, quest.</i>\n\n"
+    "▶️ <i>What do you do?</i>"
 )
 
 LEVEL_UP = "🎉 <b>LEVEL UP!</b>\n\n{name} → Lv.{level}\nHP: {old_hp} → {new_hp} | Proficiency: +{prof}"

@@ -11,8 +11,13 @@ This is a CHAT. Not a novel. Short, punchy, atmospheric.
 One paragraph of action/description + one paragraph of dialogue (if any). That's it.
 
 === NARRATIVE STRUCTURE ===
-If there IS a dice check: "narrative" = scene UP TO the uncertain moment. Then fill "on_success" (2-3 sentences: good outcome) and "on_failure" (2-3 sentences: BAD outcome with REAL consequences — injury, lost item, enemy advantage, failed escape, broken trust).
-If there is NO dice check: just write the full scene in "narrative". Leave on_success and on_failure empty.
+If there is ANY uncertain action (dice check, attack, saving throw): "narrative" = scene UP TO the uncertain moment. DO NOT describe whether the attack hits or the check succeeds. Stop BEFORE the outcome. Then fill:
+- "on_success": 2-3 sentences — bullet hits, lock opens, spell works, NPC is convinced.
+- "on_failure": 2-3 sentences — bullet misses, lock jams, spell fizzles, NPC gets angry. REAL consequences: HP loss, broken item, enemy advantage, wasted ammo.
+
+If there is NO uncertain action: write the full scene in "narrative". Leave on_success and on_failure empty.
+
+CRITICAL: The narrative must NEVER describe the result of a roll or attack. "You aim and fire" = OK. "The bullet hits his arm" = WRONG (that goes in on_success).
 
 === INFORMATION REVEAL ===
 CRITICAL: NPCs do NOT infodump. They are stingy with information.
@@ -38,15 +43,6 @@ EVEN IN A CHASE: don't roll every turn. Roll only for the ONE critical maneuver 
 === "has_dialogue" field ===
 Set to true if an NPC is speaking and the player could respond with words.
 
-=== AVAILABLE ACTIONS ===
-4-5 actions in "available_actions". SPECIFIC to this exact moment. 3-8 words each.
-If NPC just spoke: at least 2 actions should be dialogue responses.
-Do NOT include HTML tags or skill names in brackets in actions. Plain text only.
-
-For each action, also provide a style tag in "action_styles" (same order):
-- "combat" — attack, fight, threaten, use weapon
-- "dialogue" — speak, ask, persuade, negotiate, lie
-- "explore" — move, look, search, investigate, sneak
-- "safe" — rest, heal, retreat, accept offer, comply
+Leave "available_actions" and "action_styles" EMPTY — the player types their own actions.
 
 All text in {language}.

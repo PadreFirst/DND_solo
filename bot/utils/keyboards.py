@@ -180,32 +180,14 @@ _STYLE_MAP = {
 
 
 def actions_keyboard(
-    actions: list[str],
+    actions: list[str] | None = None,
     lang: str = "en",
     styles: list[str] | None = None,
 ) -> InlineKeyboardMarkup:
-    buttons = []
-    for i, action in enumerate(actions[:5]):
-        label = _clean_action(action)
-        if not label:
-            continue
-
-        style_key = styles[i] if styles and i < len(styles) else None
-        tg_style, emoji = _STYLE_MAP.get(style_key or "", (None, ""))
-        display = f"{emoji} {label}" if emoji else label
-
-        btn_kwargs = {
-            "text": display,
-            "callback_data": _trim_callback("act:", label),
-        }
-        if tg_style:
-            btn_kwargs["style"] = tg_style
-
-        buttons.append([InlineKeyboardButton(**btn_kwargs)])
-
     menu_label = "📋 Меню" if lang == "ru" else "📋 Menu"
-    buttons.append([InlineKeyboardButton(text=menu_label, callback_data="gamemenu:open")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=menu_label, callback_data="gamemenu:open")],
+    ])
 
 
 def rest_keyboard(lang: str) -> InlineKeyboardMarkup:

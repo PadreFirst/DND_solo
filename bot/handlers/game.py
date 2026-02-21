@@ -328,6 +328,8 @@ async def _process_player_action(
                 decision.attack_damage_dice or "1d8", decision.attack_ability or "strength", True,
             )
             mechanics_lines.append(atk.display)
+            if not atk.hit:
+                any_check_failed = True
         except Exception:
             log.warning("Attack failed: ac=%s dice=%s", decision.attack_target_ac, decision.attack_damage_dice)
 
@@ -401,9 +403,14 @@ async def _process_player_action(
     parts.append(narrative)
 
     if decision.has_dialogue:
-        hint = ("💬 <i>Выбери вариант или напечатай свой ответ</i>"
+        hint = ("💬 <i>Напиши, что скажешь или сделаешь</i>"
                 if user.language == "ru"
-                else "💬 <i>Pick an option or type your reply</i>")
+                else "💬 <i>Type what you say or do</i>")
+        parts.append(hint)
+    else:
+        hint = ("▶️ <i>Что делаешь?</i>"
+                if user.language == "ru"
+                else "▶️ <i>What do you do?</i>")
         parts.append(hint)
 
     if leveled_up:
