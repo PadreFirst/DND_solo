@@ -32,7 +32,8 @@ ABILITIES RULES — CRITICAL:
   Star Wars Sith → Удушение Силой, Молнии Силы, Тёмное предвидение.
   Cyberpunk hacker → Нейровзлом, Перегрузка системы.
   Classic fantasy Paladin → Божественное чувство, Наложение рук.
-  DO NOT invent generic abilities like "Удар Ненависти" — use actual abilities from the source material.
+  For known universes (Star Wars, LotR, etc.) — use recognizable abilities from that universe. DO NOT invent generic names like "Удар Ненависти".
+  For original/custom worlds — invent fitting abilities that match the world's lore and tone.
 - Each ability fields:
   - name: in {language}
   - type: "active" or "passive"
