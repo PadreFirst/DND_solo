@@ -92,7 +92,12 @@ If there are NO dice checks:
 - Fill "available_actions" + "action_styles" with 3-4 actions for the current scene.
 - Leave on_success/on_failure actions EMPTY.
 
-ACTION FORMAT: Each action is 3-6 words, in {language}. Include:
+ACTION FORMAT — STRICT LENGTH LIMIT:
+- Each action: verb + 1-2 words, MAX 25 characters, MAX 4 words. In {language}.
+- Examples (RU): "Атаковать мечом", "Спрятаться в тени", "Обмануть стражу", "Осмотреть комнату"
+- Examples (EN): "Strike with sword", "Hide in shadows", "Bluff the guard", "Search the room"
+- NEVER exceed 25 characters — buttons are truncated in Telegram UI.
+Include:
 - At least 1 cautious/safe option
 - At least 1 bold/risky option
 - If dialogue is happening: 1-2 dialogue options

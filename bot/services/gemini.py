@@ -189,6 +189,13 @@ class InventoryItem(BaseModel):
     equipped: bool = False
 
 
+class AbilityProposal(BaseModel):
+    name: str = ""
+    type: str = Field(default="active", description="'active' or 'passive'")
+    recharge: str = Field(default="", description="'short rest','long rest','at will','per turn','spell slots', or empty")
+    desc: str = Field(default="", description="1 sentence: what does this ability do")
+
+
 class CharacterProposal(BaseModel):
     """AI fills narrative fields + suggests inventory. Stats, HP, AC computed in code."""
     name: str = ""
@@ -198,6 +205,7 @@ class CharacterProposal(BaseModel):
     backstory: str = Field(default="", description="2-3 paragraph backstory matching the world")
     personality_summary: str = Field(default="", description="Short personality description")
     suggested_inventory: list[InventoryItem] = Field(default_factory=list, description="8-12 setting-appropriate starting items")
+    suggested_abilities: list[AbilityProposal] = Field(default_factory=list, description="3-5 setting-appropriate class abilities")
 
 
 class MissionProposal(BaseModel):

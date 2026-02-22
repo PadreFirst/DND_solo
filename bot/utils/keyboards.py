@@ -153,12 +153,16 @@ def _strip_html(text: str) -> str:
 
 
 def _clean_action(text: str) -> str:
-    """Strip HTML, trim to reasonable button length."""
+    """Strip HTML, trim to fit Telegram button (max 25 visible chars)."""
     clean = _strip_html(text)
     clean = clean.strip("«»\"'")
-    if len(clean) > 40:
-        clean = clean[:37] + "..."
-    return clean
+    if len(clean) <= 25:
+        return clean
+    cut = clean[:25]
+    last_space = cut.rfind(" ")
+    if last_space > 10:
+        return cut[:last_space]
+    return cut
 
 
 def _trim_callback(prefix: str, text: str) -> str:

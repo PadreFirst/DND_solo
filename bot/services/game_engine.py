@@ -445,6 +445,7 @@ def build_full_character(
     personality: str = "",
     genre: str = "",
     ai_inventory: list[dict] | None = None,
+    ai_abilities: list[dict] | None = None,
 ) -> None:
     """Apply all deterministic mechanics to a character after AI provides narrative fields."""
     canon_class = normalize_class_name(char_class)
@@ -486,7 +487,20 @@ def build_full_character(
     char.hit_dice_face = hit_die
 
     char.spell_slots = CLASS_SPELL_SLOTS.get(canon_class, {})
-    char.abilities = CLASS_ABILITIES.get(canon_class, [])
+
+    if ai_abilities:
+        char.abilities = [
+            {
+                "name": a.get("name", "?"),
+                "type": a.get("type", "active"),
+                "recharge": a.get("recharge", ""),
+                "desc": a.get("desc", ""),
+            }
+            for a in ai_abilities if a.get("name")
+        ]
+    else:
+        char.abilities = CLASS_ABILITIES.get(canon_class, [])
+
     char.death_save_successes = 0
     char.death_save_failures = 0
 

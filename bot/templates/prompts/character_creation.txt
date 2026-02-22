@@ -17,6 +17,7 @@ YOUR TASK — fill these fields:
 4. backstory: 2-3 paragraphs tying into the WORLD SETTING, matching the TONE, with hooks for adventure
 5. personality_summary: 1-2 vivid sentences
 6. suggested_inventory: 8-12 STARTING ITEMS that make sense for THIS character in THIS world.
+7. suggested_abilities: 3-5 class abilities for THIS character in THIS world.
 
 INVENTORY RULES — CRITICAL:
 - Items MUST fit the WORLD SETTING. Modern world = modern items (phone, car keys, pistol, wallet, jacket). Fantasy = swords, armor, potions.
@@ -24,6 +25,16 @@ INVENTORY RULES — CRITICAL:
 - For each item set: name (in {language}), type (weapon/armor/ammo/consumable/misc), description (brief), equipped (true for worn/carried items).
 - Be SPECIFIC to the character: a hacker gets a laptop, a detective gets a magnifying glass, a street thug gets brass knuckles.
 - Think: what would this person ACTUALLY have in their pockets/bag right now?
+
+ABILITIES RULES — CRITICAL:
+- Abilities MUST fit the WORLD SETTING, not generic DnD.
+  Star Wars Jedi → Чувство Силы, Телекинез, Отражение бластеров.
+  Star Wars Sith → Удушение Силой, Молнии Силы, Тёмное предвидение.
+  Cyberpunk hacker → Нейровзлом, Перегрузка системы.
+  Classic fantasy Paladin → Божественное чувство, Наложение рук.
+- Each ability: name (in {language}), type ("active" or "passive"), recharge ("short rest", "long rest", "at will", "per turn", or empty for passive), desc (1 clear sentence in {language} explaining what it does).
+- Include 2-3 active abilities + 1-2 passive abilities.
+- desc must be understandable to a person who has never played DnD. Write it in plain language: what exactly happens when the ability is used, in game terms.
 
 The game engine handles ALL mechanics (stats, HP, AC, damage dice, gold) automatically. Do NOT output stats.
 
