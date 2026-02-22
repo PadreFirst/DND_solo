@@ -184,14 +184,31 @@ def actions_keyboard(
     lang: str = "en",
     styles: list[str] | None = None,
 ) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+
+    if actions:
+        for i, act in enumerate(actions[:4]):
+            clean = _clean_action(act)
+            if not clean:
+                continue
+            cb_data = _trim_callback("act:", clean)
+
+            style_key = (styles[i] if styles and i < len(styles) else None)
+            style_val, emoji = _STYLE_MAP.get(style_key or "", (None, ""))
+            label = f"{emoji} {clean}" if emoji else clean
+
+            btn_kwargs = {"text": label, "callback_data": cb_data}
+            if style_val:
+                btn_kwargs["style"] = style_val
+            rows.append([InlineKeyboardButton(**btn_kwargs)])
+
     menu_label = "📋 Меню" if lang == "ru" else "📋 Menu"
     gm_label = "❓ ГМ" if lang == "ru" else "❓ GM"
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text=menu_label, callback_data="gamemenu:open", style="primary"),
-            InlineKeyboardButton(text=gm_label, callback_data="gamemenu:askgm", style="success"),
-        ],
+    rows.append([
+        InlineKeyboardButton(text=menu_label, callback_data="gamemenu:open", style="primary"),
+        InlineKeyboardButton(text=gm_label, callback_data="gamemenu:askgm", style="success"),
     ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def rest_keyboard(lang: str) -> InlineKeyboardMarkup:

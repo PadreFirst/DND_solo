@@ -173,6 +173,59 @@ CLASS_SPELL_SLOTS: dict[str, dict] = {
     "Ranger": {},
 }
 
+CLASS_ABILITIES: dict[str, list[dict]] = {
+    "Fighter": [
+        {"name": "Second Wind", "type": "active", "recharge": "short rest", "desc": "Bonus action: heal 1d10+level HP"},
+        {"name": "Fighting Style", "type": "passive", "desc": "Chosen combat specialization"},
+    ],
+    "Wizard": [
+        {"name": "Arcane Recovery", "type": "active", "recharge": "long rest", "desc": "Recover spell slots on short rest"},
+        {"name": "Spellcasting", "type": "active", "recharge": "spell slots", "desc": "Cast prepared arcane spells"},
+    ],
+    "Rogue": [
+        {"name": "Sneak Attack", "type": "active", "recharge": "per turn", "desc": "Extra 1d6 damage with advantage or ally nearby"},
+        {"name": "Expertise", "type": "passive", "desc": "Double proficiency on 2 chosen skills"},
+        {"name": "Thieves' Cant", "type": "passive", "desc": "Secret criminal language"},
+    ],
+    "Cleric": [
+        {"name": "Channel Divinity", "type": "active", "recharge": "short rest", "desc": "Divine power: Turn Undead or domain feature"},
+        {"name": "Spellcasting", "type": "active", "recharge": "spell slots", "desc": "Cast divine spells"},
+    ],
+    "Ranger": [
+        {"name": "Favored Enemy", "type": "passive", "desc": "Advantage on tracking chosen enemy type"},
+        {"name": "Natural Explorer", "type": "passive", "desc": "Expertise in navigating chosen terrain"},
+        {"name": "Spellcasting", "type": "active", "recharge": "spell slots", "desc": "Cast nature spells (from Lv.2)"},
+    ],
+    "Paladin": [
+        {"name": "Divine Sense", "type": "active", "recharge": "long rest", "desc": "Detect celestial/fiend/undead nearby"},
+        {"name": "Lay on Hands", "type": "active", "recharge": "long rest", "desc": "Heal 5×level HP total pool"},
+    ],
+    "Bard": [
+        {"name": "Bardic Inspiration", "type": "active", "recharge": "long rest", "desc": "Give ally 1d6 bonus to roll"},
+        {"name": "Spellcasting", "type": "active", "recharge": "spell slots", "desc": "Cast arcane spells via music"},
+    ],
+    "Barbarian": [
+        {"name": "Rage", "type": "active", "recharge": "long rest", "desc": "Bonus damage, resist physical, advantage on STR. 2 uses."},
+        {"name": "Unarmored Defense", "type": "passive", "desc": "AC = 10 + DEX + CON without armor"},
+    ],
+    "Monk": [
+        {"name": "Martial Arts", "type": "passive", "desc": "Unarmed strikes deal 1d4, use DEX, bonus unarmed strike"},
+        {"name": "Ki", "type": "active", "recharge": "short rest", "desc": "2 Ki points: Flurry of Blows, Patient Defense, Step of the Wind"},
+    ],
+    "Sorcerer": [
+        {"name": "Sorcery Points", "type": "active", "recharge": "long rest", "desc": "2 points: create/convert spell slots, power metamagic"},
+        {"name": "Spellcasting", "type": "active", "recharge": "spell slots", "desc": "Cast innate arcane spells"},
+    ],
+    "Warlock": [
+        {"name": "Eldritch Blast", "type": "active", "recharge": "at will", "desc": "Cantrip: 1d10 force damage ranged attack"},
+        {"name": "Pact Magic", "type": "active", "recharge": "short rest", "desc": "1 spell slot, always max level, recovers on short rest"},
+    ],
+    "Druid": [
+        {"name": "Wild Shape", "type": "active", "recharge": "short rest", "desc": "Transform into beast form. 2 uses."},
+        {"name": "Spellcasting", "type": "active", "recharge": "spell slots", "desc": "Cast nature spells"},
+    ],
+}
+
 _KNOWN_CLASSES = list(CLASS_STAT_PRIORITY.keys())
 
 
@@ -433,6 +486,7 @@ def build_full_character(
     char.hit_dice_face = hit_die
 
     char.spell_slots = CLASS_SPELL_SLOTS.get(canon_class, {})
+    char.abilities = CLASS_ABILITIES.get(canon_class, [])
     char.death_save_successes = 0
     char.death_save_failures = 0
 
@@ -758,6 +812,20 @@ def apply_damage(char: Character, damage: int) -> str:
     if char.current_hp == 0:
         return "unconscious"
     return "alive"
+
+
+def apply_damage_verbose(char: Character, damage: int, lang: str = "en") -> str:
+    old_hp = char.current_hp
+    status = apply_damage(char, damage)
+    if lang == "ru":
+        line = f"💔 -{damage} HP → {char.current_hp}/{char.max_hp}"
+        if status == "unconscious":
+            line += " ⚠️ Без сознания!"
+    else:
+        line = f"💔 -{damage} HP → {char.current_hp}/{char.max_hp}"
+        if status == "unconscious":
+            line += " ⚠️ Unconscious!"
+    return line
 
 
 def apply_healing(char: Character, healing: int) -> None:

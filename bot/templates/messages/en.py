@@ -62,8 +62,9 @@ GAME_START = (
     "{opening_scene}\n\n"
     "─────────────\n"
     "💡 <b>Just type what your character does.</b>\n"
-    "<i>Speak, act, explore — write anything. "
-    "'Menu' button for character sheet, inventory, quest.</i>\n\n"
+    "<i>Speak, act, explore — write anything.</i>\n"
+    "📋 'Menu' button for character sheet, inventory, quest.\n"
+    "❓ Start with <b>GM:</b> to ask the Game Master a question.\n\n"
     "▶️ <i>What do you do?</i>"
 )
 

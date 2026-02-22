@@ -112,6 +112,18 @@ def _build_system_info(char: Character) -> str:
     ]
     if slots_parts:
         lines.append(f"Spell Slots: {', '.join(slots_parts)}")
+
+    abilities = char.abilities
+    if abilities:
+        active = [a for a in abilities if a.get("type") == "active"]
+        passive = [a for a in abilities if a.get("type") == "passive"]
+        if active:
+            active_str = ", ".join(f"{a['name']} ({a.get('desc', '')})" for a in active)
+            lines.append(f"Active Abilities: {active_str}")
+        if passive:
+            passive_str = ", ".join(f"{a['name']} ({a.get('desc', '')})" for a in passive)
+            lines.append(f"Passive Abilities: {passive_str}")
+
     if char.backstory:
         lines.append(f"Backstory: {char.backstory[:300]}")
     lines.append("[/SYSTEM INFO]")

@@ -20,6 +20,7 @@ from bot.services.personalization import maybe_run_deep_analysis, track_action_c
 from bot.services.prompt_builder import game_turn_prompt, system_prompt
 from bot.services.user_service import ensure_character, ensure_session, get_or_create_user, reset_game
 from bot.utils.formatters import (
+    compact_stat_bar,
     format_character_sheet,
     format_inventory,
     format_quest,
@@ -97,9 +98,8 @@ async def on_game_menu(cb: CallbackQuery, db: AsyncSession) -> None:
         return
 
     if action == "close":
-        last_actions = _default_actions(user.language)
         await cb.message.edit_reply_markup(
-            reply_markup=actions_keyboard(last_actions, user.language)
+            reply_markup=actions_keyboard(None, user.language)
         )
         await cb.answer()
         return
@@ -220,6 +220,62 @@ async def on_action_button(cb: CallbackQuery, db: AsyncSession) -> None:
     await _process_player_action(cb.message, cb.from_user.id, cb.from_user.username, action_text, db)
 
 
+# ---- Meta-question detection (#2) ----
+
+_GM_PREFIXES = ("гм:", "гм,", "gm:", "gm,", "мастер:", "мастер,", "dm:", "dm,")
+_GM_PATTERNS_RU = ("а что значит", "а как работает", "а почему", "объясни", "расскажи про механик",
+                   "что такое", "как мне", "подскажи", "напомни правил", "сколько у меня",
+                   "а что за", "уважаемый гм", "уважаемый мастер", "вопрос к мастер")
+_GM_PATTERNS_EN = ("what does", "how does", "what is", "explain", "remind me", "how do i",
+                   "tell me about mechanic", "what are my", "question for")
+
+
+def _is_meta_question(text: str) -> bool:
+    low = text.lower().strip()
+    for prefix in _GM_PREFIXES:
+        if low.startswith(prefix):
+            return True
+    for p in _GM_PATTERNS_RU:
+        if low.startswith(p):
+            return True
+    for p in _GM_PATTERNS_EN:
+        if low.startswith(p):
+            return True
+    return False
+
+
+async def _handle_meta_question(message: Message, user, db: AsyncSession) -> None:
+    """Answer a meta-question without spending a game turn."""
+    await _typing(message)
+    char = await ensure_character(user, db)
+    gs = await ensure_session(user, db)
+    ctx = await build_context(user, char, gs, db)
+    question = message.text.strip()
+    for prefix in _GM_PREFIXES:
+        if question.lower().startswith(prefix):
+            question = question[len(prefix):].strip()
+            break
+    prompt = (
+        f"{ctx}\n\nThe player asks a META-QUESTION (out of game, about mechanics/rules/character): "
+        f"\"{question}\"\n\n"
+        f"Answer helpfully about game mechanics, rules, character abilities, or strategy. "
+        f"Do NOT advance the story. Do NOT generate dice rolls. "
+        f"Write in {user.language}. Use HTML formatting. Be concise (2-4 sentences)."
+    )
+    try:
+        text = await generate_narrative(prompt, content_tier=user.content_tier.value)
+        text = md_to_html(text)
+        label = "ГМ" if user.language == "ru" else "GM"
+        await message.answer(
+            truncate_for_telegram(f"({label}: {text})", 3800),
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        log.exception("Meta-question failed")
+        err = e.user_message(user.language) if isinstance(e, GeminiError) else t("ERROR", user.language)
+        await message.answer(err, parse_mode="HTML")
+
+
 # ---- Free text ----
 
 @router.message(F.text)
@@ -232,6 +288,10 @@ async def on_game_text(message: Message, db: AsyncSession) -> None:
         if not handled:
             hint = "👆 Нажми кнопку выше" if user.language == "ru" else "👆 Please press a button above"
             await message.answer(hint)
+        return
+
+    if _is_meta_question(message.text):
+        await _handle_meta_question(message, user, db)
         return
 
     await _typing(message)
@@ -275,6 +335,14 @@ async def _process_player_action(
     context = await build_context(user, char, gs, db)
     full_context = f"{sys_prompt}\n\n{context}"
 
+    # --- #8: Send placeholder immediately for perceived speed ---
+    lang = user.language
+    placeholder_text = "🎲 <i>Обрабатываю ход...</i>" if lang == "ru" else "🎲 <i>Processing turn...</i>"
+    try:
+        progress_msg = await reply_target.answer(placeholder_text, parse_mode="HTML")
+    except Exception:
+        progress_msg = None
+
     # Start typing indicator in background
     stop_typing = asyncio.Event()
     typing_task = asyncio.create_task(
@@ -293,7 +361,13 @@ async def _process_player_action(
         await typing_task
         log.exception("Game turn failed")
         err_text = e.user_message(user.language) if isinstance(e, GeminiError) else t("ERROR", user.language)
-        err_text += "\n\n<i>" + ("Прогресс сохранён." if user.language == "ru" else "Progress saved.") + "</i>"
+        err_text += "\n\n<i>" + ("Прогресс сохранён." if lang == "ru" else "Progress saved.") + "</i>"
+        if progress_msg:
+            try:
+                await progress_msg.edit_text(err_text, parse_mode="HTML")
+                return
+            except Exception:
+                pass
         await reply_target.answer(err_text, parse_mode="HTML")
         return
 
@@ -304,13 +378,13 @@ async def _process_player_action(
     mechanics_lines: list[str] = []
     any_succeeded = False
     any_failed = False
-
-    lang = user.language
+    had_checks = False
 
     for sc in decision.skill_checks:
         try:
             r = engine.skill_check(char, sc.skill, sc.dc, sc.advantage, sc.disadvantage)
             mechanics_lines.append(r.display_localized(lang))
+            had_checks = True
             if r.success:
                 any_succeeded = True
             else:
@@ -322,6 +396,7 @@ async def _process_player_action(
         try:
             r = engine.saving_throw(char, st.ability, st.dc, st.advantage, st.disadvantage)
             mechanics_lines.append(r.display_localized(lang))
+            had_checks = True
             if r.success:
                 any_succeeded = True
             else:
@@ -336,6 +411,7 @@ async def _process_player_action(
                 decision.attack_damage_dice or "1d8", decision.attack_ability or "strength", True,
             )
             mechanics_lines.append(atk.display_localized(lang))
+            had_checks = True
             if atk.hit:
                 any_succeeded = True
             else:
@@ -343,20 +419,28 @@ async def _process_player_action(
         except Exception:
             log.warning("Attack failed: ac=%s dice=%s", decision.attack_target_ac, decision.attack_damage_dice)
 
+    # --- #1: Show NPC damage with HP result ---
     for npc in decision.npc_actions:
         if npc.damage_dice:
             try:
                 dmg = engine.roll(npc.damage_dice, reason=f"{npc.name}")
-                status = engine.apply_damage(char, dmg.total)
-                mechanics_lines.append(f"{npc.name}: {dmg.display} → {status}")
+                hp_line = engine.apply_damage_verbose(char, dmg.total, lang)
+                mechanics_lines.append(f"{npc.name}: {dmg.display}")
+                mechanics_lines.append(hp_line)
             except Exception:
                 log.warning("NPC damage failed: %s", npc.damage_dice)
 
+    # --- #1: Show stat_changes HP with result ---
     for sc in decision.stat_changes:
         if sc.stat == "current_hp" and sc.delta < 0:
-            engine.apply_damage(char, abs(sc.delta))
+            hp_line = engine.apply_damage_verbose(char, abs(sc.delta), lang)
+            mechanics_lines.append(hp_line)
         elif sc.stat == "current_hp" and sc.delta > 0:
+            old_hp_val = char.current_hp
             engine.apply_healing(char, sc.delta)
+            healed = char.current_hp - old_hp_val
+            if healed > 0:
+                mechanics_lines.append(f"💚 +{healed} HP → {char.current_hp}/{char.max_hp}")
 
     if decision.inventory_changes:
         changes = [
@@ -366,19 +450,25 @@ async def _process_player_action(
         ]
         for ic in decision.inventory_changes:
             prefix = "+" if ic.action != "remove" else "-"
-            qty_str = f" x{ic.quantity}" if ic.quantity > 1 else ""
             mechanics_lines.append(f"🎒 {prefix}{ic.quantity} {ic.name}" if ic.quantity != 1 else f"🎒 {prefix}{ic.name}")
         char.inventory = engine.merge_inventory(char.inventory, changes)
         char.inventory = engine.ensure_ammo(char.inventory)
 
     if decision.gold_change:
         char.gold = max(0, char.gold + decision.gold_change)
+        sign = "+" if decision.gold_change > 0 else ""
+        mechanics_lines.append(f"💰 {sign}{decision.gold_change}g")
+
+    # --- #5: Auto XP fallback ---
+    xp_to_grant = decision.xp_gained
+    if xp_to_grant == 0 and had_checks:
+        xp_to_grant = 25
 
     leveled_up = False
     old_hp = char.max_hp
-    if decision.xp_gained > 0:
-        leveled_up = engine.grant_xp(char, decision.xp_gained)
-        mechanics_lines.append(f"✨ +{decision.xp_gained} XP")
+    if xp_to_grant > 0:
+        leveled_up = engine.grant_xp(char, xp_to_grant)
+        mechanics_lines.append(f"✨ +{xp_to_grant} XP")
 
     if decision.location_change:
         gs.current_location = decision.location_change
@@ -422,42 +512,51 @@ async def _process_player_action(
 
     if decision.has_dialogue:
         hint = ("💬 <i>Напиши, что скажешь или сделаешь</i>"
-                if user.language == "ru"
+                if lang == "ru"
                 else "💬 <i>Type what you say or do</i>")
         parts.append(hint)
     else:
         hint = ("▶️ <i>Что делаешь?</i>"
-                if user.language == "ru"
+                if lang == "ru"
                 else "▶️ <i>What do you do?</i>")
         parts.append(hint)
 
+    # --- #6: Compact stat bar ---
+    parts.append(f"<code>{compact_stat_bar(char)}</code>")
+
     if leveled_up:
-        parts.append(t("LEVEL_UP", user.language, name=char.name, level=str(char.level),
+        parts.append(t("LEVEL_UP", lang, name=char.name, level=str(char.level),
                         old_hp=str(old_hp), new_hp=str(char.max_hp), prof=str(char.proficiency_bonus)))
     if char.current_hp <= 0:
-        parts.append(t("DEATH", user.language, name=char.name))
+        parts.append(t("DEATH", lang, name=char.name))
 
     elapsed = int((time.monotonic() - start_time) * 1000)
     log.info("Turn %d user %d: %dms", gs.turn_number, user.telegram_id, elapsed)
 
-    final_actions = decision.available_actions if decision.available_actions else _default_actions(user.language)
+    # --- #7: Action buttons ---
+    final_actions = decision.available_actions if decision.available_actions else None
     final_styles = decision.action_styles if decision.action_styles else None
-    try:
-        await reply_target.answer(
-            truncate_for_telegram("\n\n".join(parts)),
-            parse_mode="HTML",
-            reply_markup=actions_keyboard(final_actions, user.language, styles=final_styles),
-        )
-    except Exception:
-        log.exception("Failed to send turn response, trying without buttons")
+
+    full_text = truncate_for_telegram("\n\n".join(parts))
+    kb = actions_keyboard(final_actions, lang, styles=final_styles)
+
+    # --- #8: Edit placeholder with final result ---
+    sent = False
+    if progress_msg:
         try:
-            await reply_target.answer(
-                truncate_for_telegram("\n\n".join(parts)),
-                parse_mode="HTML",
-                reply_markup=actions_keyboard(_default_actions(user.language), user.language),
-            )
+            await progress_msg.edit_text(full_text, parse_mode="HTML", reply_markup=kb)
+            sent = True
         except Exception:
-            log.exception("Failed to send even with default buttons")
-            await reply_target.answer(
-                truncate_for_telegram("\n\n".join(parts)),
-            )
+            log.warning("Failed to edit progress message, sending new one")
+
+    if not sent:
+        try:
+            await reply_target.answer(full_text, parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            log.exception("Failed to send turn response, trying without buttons")
+            try:
+                await reply_target.answer(full_text, parse_mode="HTML",
+                                          reply_markup=actions_keyboard(None, lang))
+            except Exception:
+                log.exception("Failed to send even with default buttons")
+                await reply_target.answer(full_text)

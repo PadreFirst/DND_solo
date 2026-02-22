@@ -38,38 +38,63 @@ def progress_bar(current: int, maximum: int, length: int = 10) -> str:
     return "█" * filled + "░" * (length - filled)
 
 
+def compact_stat_bar(char: Character) -> str:
+    return (
+        f"❤️ {char.current_hp}/{char.max_hp} HP"
+        f" | 🛡 AC {char.armor_class}"
+        f" | ⭐ Lv.{char.level}"
+        f" | 💰 {char.gold}g"
+    )
+
+
 def format_character_sheet(char: Character) -> str:
     next_lvl = char.level + 1
     xp_needed = XP_THRESHOLDS.get(next_lvl, 999999)
     hp_bar = progress_bar(char.current_hp, char.max_hp)
     xp_bar = progress_bar(char.xp, xp_needed)
 
-    conditions_str = ", ".join(char.conditions) if char.conditions else "None"
-    skills_str = ", ".join(char.proficient_skills) if char.proficient_skills else "None"
+    conditions_str = ", ".join(char.conditions) if char.conditions else "—"
+    skills_str = ", ".join(char.proficient_skills) if char.proficient_skills else "—"
 
     inv_count = len(char.inventory)
 
-    return (
-        f"⚔️ <b>{char.name}</b> | {char.race} {char.char_class} Lv.{char.level}\n"
-        f"\n"
-        f"❤️ HP: {hp_bar} {char.current_hp}/{char.max_hp}\n"
-        f"✨ XP: {xp_bar} {char.xp}/{xp_needed}\n"
-        f"🛡 AC: {char.armor_class}  |  ⚡ Init: {char.initiative_bonus:+d}  |  🦶 Speed: {char.speed}\n"
-        f"\n"
+    lines = [
+        f"⚔️ <b>{char.name}</b> | {char.race} {char.char_class} Lv.{char.level}",
+        f"",
+        f"❤️ HP: {hp_bar} {char.current_hp}/{char.max_hp}",
+        f"✨ XP: {xp_bar} {char.xp}/{xp_needed}",
+        f"🛡 AC: {char.armor_class}  |  ⚡ Init: {char.initiative_bonus:+d}  |  🦶 Speed: {char.speed}",
+        f"",
         f"<b>STR</b> {char.strength} ({char.str_mod:+d})  "
         f"<b>DEX</b> {char.dexterity} ({char.dex_mod:+d})  "
-        f"<b>CON</b> {char.constitution} ({char.con_mod:+d})\n"
+        f"<b>CON</b> {char.constitution} ({char.con_mod:+d})",
         f"<b>INT</b> {char.intelligence} ({char.int_mod:+d})  "
         f"<b>WIS</b> {char.wisdom} ({char.wis_mod:+d})  "
-        f"<b>CHA</b> {char.charisma} ({char.cha_mod:+d})\n"
-        f"\n"
-        f"🎯 Proficiency: +{char.proficiency_bonus}\n"
-        f"📋 Skills: {skills_str}\n"
-        f"💀 Conditions: {conditions_str}\n"
-        f"\n"
-        f"🎒 Items: {inv_count}  |  💰 Gold: {char.gold}\n"
-        f"🎲 Hit Dice: {char.hit_dice_current}/{char.hit_dice_max} ({char.hit_dice_face})"
-    )
+        f"<b>CHA</b> {char.charisma} ({char.cha_mod:+d})",
+        f"",
+        f"🎯 Proficiency: +{char.proficiency_bonus}",
+        f"📋 Skills: {skills_str}",
+    ]
+
+    abilities = char.abilities
+    if abilities:
+        active = [a for a in abilities if a.get("type") == "active"]
+        passive = [a for a in abilities if a.get("type") == "passive"]
+        if active:
+            active_str = ", ".join(f"<b>{a['name']}</b>" for a in active)
+            lines.append(f"⚡ Active: {active_str}")
+        if passive:
+            passive_str = ", ".join(a["name"] for a in passive)
+            lines.append(f"🔹 Passive: {passive_str}")
+
+    lines.extend([
+        f"💀 Conditions: {conditions_str}",
+        f"",
+        f"🎒 Items: {inv_count}  |  💰 Gold: {char.gold}",
+        f"🎲 Hit Dice: {char.hit_dice_current}/{char.hit_dice_max} ({char.hit_dice_face})",
+    ])
+
+    return "\n".join(lines)
 
 
 _TYPE_ICONS = {

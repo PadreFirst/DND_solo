@@ -56,6 +56,7 @@ class Character(Base):
     hit_dice_face: Mapped[str] = mapped_column(String(5), default="d8")
 
     spell_slots_json: Mapped[str] = mapped_column(Text, default="{}")
+    _abilities: Mapped[str] = mapped_column("abilities", Text, default="[]")
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
@@ -102,6 +103,17 @@ class Character(Base):
     @spell_slots.setter
     def spell_slots(self, value: dict) -> None:
         self.spell_slots_json = json.dumps(value)
+
+    @property
+    def abilities(self) -> list[dict]:
+        try:
+            return json.loads(self._abilities)
+        except Exception:
+            return []
+
+    @abilities.setter
+    def abilities(self, value: list[dict]) -> None:
+        self._abilities = json.dumps(value, ensure_ascii=False)
 
     def ability_modifier(self, score: int) -> int:
         return (score - 10) // 2

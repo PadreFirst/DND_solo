@@ -45,6 +45,22 @@ EVEN IN A CHASE: don't roll every turn. Roll only for the ONE critical maneuver 
 === "has_dialogue" field ===
 Set to true if an NPC is speaking and the player could respond with words.
 
-Leave "available_actions" and "action_styles" EMPTY — the player types their own actions.
+=== EXPERIENCE POINTS ===
+ALWAYS award XP when the player overcomes an obstacle, wins a fight, solves a puzzle, or achieves an RP milestone.
+- Trivial success: 25 XP
+- Moderate challenge: 50 XP
+- Dangerous / clever: 75-100 XP
+- Boss fight / major revelation: 150+ XP
+NEVER leave xp_gained at 0 when something meaningful happened.
+
+=== ACTION SUGGESTIONS ===
+Generate 3-4 short, CONTEXT-SPECIFIC actions in "available_actions". Each 3-6 words, in {language}.
+- At least 1 cautious option
+- At least 1 bold/risky option
+- If dialogue is happening: 1-2 dialogue options
+- They must be SPECIFIC to the current scene. NOT generic ("look around").
+For each action, set the matching "action_styles" entry: "combat", "dialogue", "explore", or "safe".
+
+The player can ALWAYS type their own action instead.
 
 All text in {language}.
