@@ -26,18 +26,21 @@ When setting "location_change": MUST fill "location_description" (3-5 sentences)
 When requesting an attack: fill attack_target_hp and attack_target_max_hp so the player sees how tough the enemy is.
 
 === ACTION BUTTONS ===
-Read [SYSTEM INFO]: equipped weapons, inventory, abilities, class/level.
+Before generating actions, RE-READ [SYSTEM INFO] above. The character's COMPLETE item list is there.
+- You may ONLY suggest items listed in Equipped or Inventory. If "grenade" is not listed — DO NOT suggest throwing a grenade.
+- You may ONLY suggest abilities listed in Active/Passive Abilities.
+- NEVER add "(if you have one)" or any parenthetical — if you're unsure, DON'T suggest it.
 
-ONLY suggest items/abilities the character ACTUALLY HAS. Never "throw grenade (if you have one)".
+ACTIONS MUST MATCH THE NARRATIVE. If the narrative describes a fork (left/right), the actions MUST include both directions. If the narrative describes an NPC speaking, actions MUST include a dialogue option. The player's choices come from YOUR buttons.
 
 If dice checks exist → fill on_success_actions/styles + on_failure_actions/styles. Leave available_actions empty.
 If no dice checks → fill available_actions/styles. Leave on_success/failure empty.
 
 FORMAT: verb + object/target. Complete phrase. MAX 30 chars, MAX 4 words.
-✓ "Атаковать мечом", "Бежать к выходу", "Толкнуть баллоны к двери"
-✗ "Активировать" (what?), "Подготовить плазменный" (adjective without noun), "Толкнуть баллоны" (where?)
+✓ "Атаковать мечом", "Бежать к выходу", "Свернуть налево"
+✗ "Активировать" (bare verb), "Подготовить плазменный" (no noun)
 
-If adjective+noun doesn't fit, drop the adjective. Every action MUST have a noun/target. Actions with movement/throwing MUST specify direction/target.
+Every action MUST have a noun/target. Movement actions MUST specify direction.
 
 Include: 1 cautious option, 1 bold option, 1-2 dialogue options if NPC is talking.
 
