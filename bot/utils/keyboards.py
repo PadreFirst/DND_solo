@@ -111,39 +111,77 @@ def world_keyboard(lang: str) -> InlineKeyboardMarkup:
 
 _TONES = {
     "ru": {
-        "dark": "🌑 Мрачный и тёмный",
-        "heroic": "⚔️ Героический и эпический",
-        "humor": "😄 Юмористический",
-        "realistic": "🎯 Реалистичный и жёсткий",
-        "mystery": "🔮 Загадочный и мистический",
+        "epic":    "🔥 Эпика и героизм",
+        "dark":    "💀 Мрачно и жёстко",
+        "fun":     "😄 Лёгкий и весёлый",
+        "horror":  "😱 Ужас и выживание",
+        "intrigue":"🕵️ Тайны и интриги",
     },
     "en": {
-        "dark": "🌑 Dark & Grim",
-        "heroic": "⚔️ Heroic & Epic",
-        "humor": "😄 Humorous & Lighthearted",
-        "realistic": "🎯 Realistic & Gritty",
-        "mystery": "🔮 Mysterious & Suspenseful",
+        "epic":    "🔥 Epic & Heroic",
+        "dark":    "💀 Dark & Brutal",
+        "fun":     "😄 Fun & Lighthearted",
+        "horror":  "😱 Horror & Survival",
+        "intrigue":"🕵️ Mystery & Intrigue",
+    },
+}
+
+_TONE_HINTS = {
+    "ru": {
+        "epic":     "«Властелин Колец», оригинальные «Звёздные войны»",
+        "dark":     "«Игра Престолов», «Ведьмак»",
+        "fun":      "«Стражи Галактики», «Джуманджи»",
+        "horror":   "«Чужой», «Очень странные дела»",
+        "intrigue": "«Шерлок», «Достать ножи»",
+    },
+    "en": {
+        "epic":     "Lord of the Rings, original Star Wars",
+        "dark":     "Game of Thrones, The Witcher",
+        "fun":      "Guardians of the Galaxy, Jumanji",
+        "horror":   "Alien, Stranger Things",
+        "intrigue": "Sherlock, Knives Out",
     },
 }
 
 TONE_DESCRIPTIONS = {
-    "dark": "Dark, grim, morally gray. Violence has weight, hope is scarce, atmosphere is oppressive.",
-    "heroic": "Heroic, epic, inspiring. Grand battles, noble sacrifices, triumph against the odds.",
-    "humor": "Lighthearted, witty, comedic. Pop culture references, absurd situations, fun above all.",
-    "realistic": "Grounded, gritty, consequential. Actions have real consequences, no plot armor.",
-    "mystery": "Suspenseful, enigmatic, atmospheric. Secrets everywhere, trust no one, slow revelations.",
+    "epic": (
+        "Heroic, epic, inspiring. Grand battles, noble sacrifices, triumph against the odds. "
+        "Good and evil are clear. The hero can struggle but ultimately rises. Emotional, uplifting moments. "
+        "Think Lord of the Rings, original Star Wars trilogy."
+    ),
+    "dark": (
+        "Dark, brutal, morally gray. No plot armor — anyone can die. Violence has real weight and consequences. "
+        "Difficult choices with no right answer. Betrayal, politics, survival of the cunning. "
+        "Think Game of Thrones, The Witcher."
+    ),
+    "fun": (
+        "Lighthearted, witty, comedic. Absurd situations, pop culture humor, sarcastic NPCs, lucky accidents. "
+        "Danger exists but the mood stays fun. Don't take anything too seriously. "
+        "Think Guardians of the Galaxy, Jumanji, Terry Pratchett."
+    ),
+    "horror": (
+        "Tense, oppressive, terrifying. Something is hunting the player. Resources are scarce, trust is fragile. "
+        "Psychological pressure, jump scares, body horror, creeping dread. Survival is the victory. "
+        "Think Alien, Stranger Things, Resident Evil."
+    ),
+    "intrigue": (
+        "Suspenseful, cerebral, full of secrets. Everyone has hidden motives. Puzzles, deception, investigation. "
+        "Combat is rare but decisive. The real weapon is information. Plot twists are frequent. "
+        "Think Sherlock Holmes, Knives Out, political thrillers."
+    ),
 }
 
 
 def tone_keyboard(lang: str) -> InlineKeyboardMarkup:
-    t = _TONES.get(lang, _TONES["en"])
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=t["dark"], callback_data="tone:dark")],
-        [InlineKeyboardButton(text=t["heroic"], callback_data="tone:heroic")],
-        [InlineKeyboardButton(text=t["humor"], callback_data="tone:humor")],
-        [InlineKeyboardButton(text=t["realistic"], callback_data="tone:realistic")],
-        [InlineKeyboardButton(text=t["mystery"], callback_data="tone:mystery")],
-    ])
+    tones = _TONES.get(lang, _TONES["en"])
+    hints = _TONE_HINTS.get(lang, _TONE_HINTS["en"])
+    rows = []
+    for key in ("epic", "dark", "fun", "horror", "intrigue"):
+        rows.append([InlineKeyboardButton(
+            text=f"{tones[key]}  —  {hints[key]}",
+            callback_data=f"tone:{key}",
+        )])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def char_creation_method_keyboard(lang: str) -> InlineKeyboardMarkup:

@@ -27,8 +27,8 @@ WORLD_CUSTOM = (
 )
 
 TONE_SELECT = (
-    "🎭 <b>Choose your narrative style</b>\n\n"
-    "This sets the tone for the entire adventure."
+    "🎭 <b>What vibe are you feeling?</b>\n\n"
+    "This sets the mood for the whole story."
 )
 
 CHAR_NAME_ASK = "⚔️ <b>What is your hero's name?</b>"
