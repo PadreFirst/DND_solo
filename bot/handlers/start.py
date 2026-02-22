@@ -38,6 +38,48 @@ AGE_MAP = {
 }
 
 WORLD_PRESETS = {
+    "star_wars": (
+        "Star Wars universe — the Galactic Empire, Rebel Alliance, Jedi and Sith, "
+        "lightsabers, the Force (Light and Dark sides), blasters, starships, droids, "
+        "cantinas, bounty hunters. Planets: Coruscant, Tatooine, Hoth, Dagobah, etc. "
+        "Races: humans, Twi'leks, Wookiees, Rodians, Zabrak, Togruta. "
+        "Currency: Imperial credits. Technology: hyperdrives, holoprojectors, bacta tanks."
+    ),
+    "lotr": (
+        "Middle-earth (Lord of the Rings / Tolkien) — Elves, Dwarves, Hobbits, Men, Orcs, "
+        "Wizards (Istari). Locations: the Shire, Rivendell, Moria, Rohan, Gondor, Mordor. "
+        "Artifacts: Rings of Power, palantíri, mithril. Magic is rare and subtle. "
+        "Themes: corruption of power, fellowship, long journeys through dangerous wilds. "
+        "Currency: silver pennies, gold coins of Gondor."
+    ),
+    "harry_potter": (
+        "Wizarding World (Harry Potter) — Hogwarts School of Witchcraft and Wizardry, "
+        "Ministry of Magic, Diagon Alley, Hogsmeade, Forbidden Forest, Azkaban. "
+        "Magic: wands, spells (Expelliarmus, Lumos, Patronus), potions, magical creatures "
+        "(hippogriffs, thestrals, house-elves). Houses: Gryffindor, Slytherin, Ravenclaw, Hufflepuff. "
+        "Currency: Galleons, Sickles, Knuts. Dark forces: Death Eaters, dark wizards, Unforgivable Curses."
+    ),
+    "witcher": (
+        "The Witcher universe (Andrzej Sapkowski) — the Continent, a dark medieval world "
+        "where humans, elves, dwarves coexist uneasily. Witchers are mutated monster hunters. "
+        "Magic: Signs (Igni, Aard, Quen, Yrden, Axii), sorceresses, chaos magic. "
+        "Monsters: drowners, griffins, vampires, leshens, djinn. Politics: Nilfgaard vs Northern Kingdoms. "
+        "Currency: crowns, orens. Themes: moral ambiguity, racism, the lesser evil."
+    ),
+    "marvel": (
+        "Marvel Universe — superheroes and supervillains, enhanced individuals, mutants, "
+        "alien invasions, cosmic entities. Organizations: Avengers, S.H.I.E.L.D., HYDRA, X-Men. "
+        "Tech: Stark Industries, vibranium, Pym particles. Locations: New York, Wakanda, Asgard, "
+        "the Quantum Realm. Powers: mutations, serums, tech suits, magic (sorcerers, Infinity Stones). "
+        "Currency: US dollars. Themes: responsibility, identity, protecting the world."
+    ),
+    "got": (
+        "Westeros & Essos (Game of Thrones / A Song of Ice and Fire) — medieval political intrigue, "
+        "noble houses vying for the Iron Throne. The Seven Kingdoms, the Wall, the Free Cities. "
+        "Houses: Stark, Lannister, Targaryen, Baratheon, Greyjoy, Tyrell, Martell. "
+        "Magic is rare: dragons, White Walkers, faceless men, red priests, wargs, greenseers. "
+        "Currency: gold dragons, silver stags. Themes: power, betrayal, survival, war."
+    ),
     "classic_fantasy": "Classic high fantasy — dragons, kingdoms, ancient magic, epic quests",
     "dark_fantasy": "Dark fantasy — morally gray world, gritty violence, cursed lands, eldritch horrors",
     "scifi": "Sci-fi — space travel, alien species, advanced technology, interstellar politics",

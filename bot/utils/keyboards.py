@@ -7,6 +7,12 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 _WORLDS = {
     "ru": {
+        "star_wars": "⭐ Звёздные войны",
+        "lotr": "💍 Властелин Колец",
+        "harry_potter": "🧙 Гарри Поттер",
+        "witcher": "🐺 Ведьмак",
+        "marvel": "🦸 Marvel",
+        "got": "🐉 Игра Престолов",
         "classic_fantasy": "⚔️ Классическое фэнтези",
         "dark_fantasy": "🧛 Тёмное фэнтези",
         "scifi": "🚀 Научная фантастика",
@@ -18,6 +24,12 @@ _WORLDS = {
         "custom": "✏️ Опишу сам...",
     },
     "en": {
+        "star_wars": "⭐ Star Wars",
+        "lotr": "💍 Lord of the Rings",
+        "harry_potter": "🧙 Harry Potter",
+        "witcher": "🐺 The Witcher",
+        "marvel": "🦸 Marvel",
+        "got": "🐉 Game of Thrones",
         "classic_fantasy": "⚔️ Classic Fantasy",
         "dark_fantasy": "🧛 Dark Fantasy",
         "scifi": "🚀 Sci-Fi",
@@ -65,6 +77,18 @@ def age_keyboard(lang: str) -> InlineKeyboardMarkup:
 def world_keyboard(lang: str) -> InlineKeyboardMarkup:
     w = _WORLDS.get(lang, _WORLDS["en"])
     return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text=w["star_wars"], callback_data="world:star_wars"),
+            InlineKeyboardButton(text=w["lotr"], callback_data="world:lotr"),
+        ],
+        [
+            InlineKeyboardButton(text=w["harry_potter"], callback_data="world:harry_potter"),
+            InlineKeyboardButton(text=w["witcher"], callback_data="world:witcher"),
+        ],
+        [
+            InlineKeyboardButton(text=w["marvel"], callback_data="world:marvel"),
+            InlineKeyboardButton(text=w["got"], callback_data="world:got"),
+        ],
         [
             InlineKeyboardButton(text=w["classic_fantasy"], callback_data="world:classic_fantasy"),
             InlineKeyboardButton(text=w["dark_fantasy"], callback_data="world:dark_fantasy"),
