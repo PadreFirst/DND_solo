@@ -27,14 +27,24 @@ INVENTORY RULES — CRITICAL:
 - Think: what would this person ACTUALLY have in their pockets/bag right now?
 
 ABILITIES RULES — CRITICAL:
-- Abilities MUST fit the WORLD SETTING, not generic DnD.
-  Star Wars Jedi → Чувство Силы, Телекинез, Отражение бластеров.
+- Abilities MUST fit the WORLD SETTING and be recognizable from that universe.
+  Star Wars Jedi → Телекинез Силы, Отражение бластеров, Прыжок Силы.
   Star Wars Sith → Удушение Силой, Молнии Силы, Тёмное предвидение.
   Cyberpunk hacker → Нейровзлом, Перегрузка системы.
   Classic fantasy Paladin → Божественное чувство, Наложение рук.
-- Each ability: name (in {language}), type ("active" or "passive"), recharge ("short rest", "long rest", "at will", "per turn", or empty for passive), desc (1 clear sentence in {language} explaining what it does).
+  DO NOT invent generic abilities like "Удар Ненависти" — use actual abilities from the source material.
+- Each ability fields:
+  - name: in {language}
+  - type: "active" or "passive"
+  - recharge: MUST be in {language}. Use: "без ограничений", "раз в ход", "короткий отдых", "длинный отдых", "ячейки заклинаний" (for RU). NEVER use English terms like "at will", "short rest", "spell slots".
+  - desc: 1-2 sentences in {language} explaining EXACTLY what happens mechanically. MUST include dice/numbers where applicable.
+- desc EXAMPLES (good):
+  "Толкает цель Силой на расстояние до 6 метров, нанося 1d8 урона силой. Может сбить с ног."
+  "Исцеляет союзника касанием на 2d6+2 HP. Тратит одну ячейку заклинаний."
+  "Персонаж чувствует присутствие одарённых Силой существ в радиусе 18 метров."
+- desc EXAMPLES (bad — FORBIDDEN):
+  "Персонаж направляет ярость Тёмной стороны в свой удар" (ЧТО КОНКРЕТНО ПРОИСХОДИТ? Какой урон? Какой эффект?)
 - Include 2-3 active abilities + 1-2 passive abilities.
-- desc must be understandable to a person who has never played DnD. Write it in plain language: what exactly happens when the ability is used, in game terms.
 
 The game engine handles ALL mechanics (stats, HP, AC, damage dice, gold) automatically. Do NOT output stats.
 

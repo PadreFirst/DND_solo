@@ -173,6 +173,17 @@ def format_inventory(char: Character, lang: str = "en", currency: str = "") -> s
     return "\n".join(parts)
 
 
+_RECHARGE_RU = {
+    "at will": "без ограничений",
+    "short rest": "короткий отдых",
+    "long rest": "длинный отдых",
+    "per turn": "раз в ход",
+    "spell slots": "ячейки заклинаний",
+    "per short rest": "короткий отдых",
+    "per long rest": "длинный отдых",
+}
+
+
 def format_ability_card(ability: dict, lang: str = "en") -> str:
     name = ability.get("name", "???")
     atype = ability.get("type", "active")
@@ -184,6 +195,8 @@ def format_ability_card(ability: dict, lang: str = "en") -> str:
     lines = [f"<b>{name}</b>"]
     lines.append(type_label.get(atype, atype))
     if recharge:
+        if lang == "ru":
+            recharge = _RECHARGE_RU.get(recharge.lower().strip(), recharge)
         r_label = "Перезарядка" if lang == "ru" else "Recharge"
         lines.append(f"🔄 {r_label}: {recharge}")
     if desc:

@@ -112,9 +112,12 @@ BAD (incomplete, forbidden):
 - "Активировать" ✗ (activate WHAT? no object)
 - "Подготовить плазменный" ✗ (плазменный ЧТО? cut-off adjective)
 - "Использовать свои" ✗ (свои ЧТО? dangling possessive)
+- "Силой толкнуть баллоны" ✗ (КУДА толкнуть? В кого? Нет цели/направления)
+- "Бросить гранату" ✗ (КУДА? В кого? "Бросить гранату в Векса" ✓)
 
 RULE: If you can't fit adjective+noun, DROP the adjective. "Взять бластер" > "Взять плазменный бластер".
 RULE: Every action MUST contain a noun or a clear target. Bare verbs and dangling adjectives are FORBIDDEN.
+RULE: Actions involving MOVING or THROWING something must specify the DIRECTION or TARGET. "Толкнуть баллоны в дверь" ✓, "Толкнуть баллоны" ✗.
 
 Include:
 - At least 1 cautious/safe option
