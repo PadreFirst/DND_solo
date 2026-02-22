@@ -132,6 +132,8 @@ def _build_system_info(char: Character) -> str:
 
 def _build_world_block(session: GameSession) -> str:
     state = session.to_state_dict()
+    currency = getattr(session, "currency_name", None) or "gold"
+    state["currency"] = currency
     return (
         f"=== WORLD STATE (source of truth) ===\n"
         f"{json.dumps(state, indent=2, ensure_ascii=False)}"

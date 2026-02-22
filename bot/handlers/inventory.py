@@ -9,7 +9,7 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models.user import OnboardingState
-from bot.services.user_service import ensure_character, get_or_create_user
+from bot.services.user_service import ensure_character, ensure_session, get_or_create_user
 from bot.utils.formatters import format_inventory
 from bot.utils.keyboards import inventory_item_keyboard, inventory_list_keyboard
 
@@ -25,7 +25,9 @@ async def cmd_inventory(message: Message, db: AsyncSession) -> None:
         await message.answer(hint)
         return
     char = user.character
-    text = format_inventory(char)
+    gs = await ensure_session(user, db)
+    cur = gs.currency_name or ""
+    text = format_inventory(char, user.language, cur)
     kb = inventory_list_keyboard(char.inventory) if char.inventory else None
     await message.answer(text, parse_mode="HTML", reply_markup=kb)
 
@@ -120,7 +122,9 @@ async def on_inv_drop(cb: CallbackQuery, db: AsyncSession) -> None:
     name = dropped.get("name", "???")
     msg = f"Выброшено: {name}" if user.language == "ru" else f"Dropped {name}"
     await cb.answer(msg)
-    text = format_inventory(char)
+    gs = await ensure_session(user, db)
+    cur = gs.currency_name or ""
+    text = format_inventory(char, user.language, cur)
     kb = inventory_list_keyboard(char.inventory) if char.inventory else None
     await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
 
@@ -156,7 +160,9 @@ async def on_inv_inspect(cb: CallbackQuery, db: AsyncSession) -> None:
 async def on_inv_back(cb: CallbackQuery, db: AsyncSession) -> None:
     user = await get_or_create_user(cb.from_user.id, cb.from_user.username, db)
     char = await ensure_character(user, db)
-    text = format_inventory(char)
+    gs = await ensure_session(user, db)
+    cur = gs.currency_name or ""
+    text = format_inventory(char, user.language, cur)
     kb = inventory_list_keyboard(char.inventory) if char.inventory else None
     await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
     await cb.answer()

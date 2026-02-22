@@ -45,6 +45,12 @@ EVEN IN A CHASE: don't roll every turn. Roll only for the ONE critical maneuver 
 === "has_dialogue" field ===
 Set to true if an NPC is speaking and the player could respond with words.
 
+=== ATTACK TARGET INFO ===
+When requesting an attack (setting attack_target_ac > 0), you MUST also fill:
+- attack_target_hp: the target's CURRENT hit points
+- attack_target_max_hp: the target's MAXIMUM hit points
+The player needs to see how tough the enemy is to make tactical decisions.
+
 === EXPERIENCE POINTS ===
 ALWAYS award XP when the player overcomes an obstacle, wins a fight, solves a puzzle, or achieves an RP milestone.
 - Trivial success: 25 XP
@@ -53,13 +59,35 @@ ALWAYS award XP when the player overcomes an obstacle, wins a fight, solves a pu
 - Boss fight / major revelation: 150+ XP
 NEVER leave xp_gained at 0 when something meaningful happened.
 
-=== ACTION SUGGESTIONS ===
-Generate 3-4 short, CONTEXT-SPECIFIC actions in "available_actions". Each 3-6 words, in {language}.
-- At least 1 cautious option
+=== ACTION SUGGESTIONS (CRITICAL — READ CAREFULLY) ===
+
+STEP 1: Read [SYSTEM INFO] above. Note the character's:
+- Equipped weapons (use them in combat suggestions)
+- Inventory items (ONLY suggest items that EXIST)
+- Active Abilities (suggest them when relevant)
+- Passive Abilities (inform tactical options)
+- Class and Level (determines what's mechanically possible)
+
+STEP 2: Generate actions based on WHAT THE CHARACTER ACTUALLY HAS.
+- NEVER suggest an item the character does NOT have in inventory. No "throw grenade (if you have one)" — either they have it or don't suggest it.
+- NEVER suggest an ability the character does NOT have.
+- DO suggest equipped weapons by name ("Strike with lightsaber", "Shoot with E-11").
+- DO suggest active abilities when tactically relevant ("Use Force Push", "Eldritch Blast").
+
+STEP 3: If there are dice checks (skill_checks, saving_throws, or attack):
+- Fill "on_success_actions" + "on_success_styles": 3-4 actions appropriate for the SUCCESS outcome.
+- Fill "on_failure_actions" + "on_failure_styles": 3-4 actions appropriate for the FAILURE outcome.
+- Leave "available_actions" and "action_styles" EMPTY (the code picks the right set after rolling).
+
+If there are NO dice checks:
+- Fill "available_actions" + "action_styles" with 3-4 actions for the current scene.
+- Leave on_success/on_failure actions EMPTY.
+
+ACTION FORMAT: Each action is 3-6 words, in {language}. Include:
+- At least 1 cautious/safe option
 - At least 1 bold/risky option
 - If dialogue is happening: 1-2 dialogue options
-- They must be SPECIFIC to the current scene. NOT generic ("look around").
-For each action, set the matching "action_styles" entry: "combat", "dialogue", "explore", or "safe".
+For each action, set the matching style: "combat", "dialogue", "explore", or "safe".
 
 The player can ALWAYS type their own action instead.
 

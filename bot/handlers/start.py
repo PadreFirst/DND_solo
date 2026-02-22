@@ -193,6 +193,10 @@ async def on_char_review(cb: CallbackQuery, db: AsyncSession) -> None:
 
         gs.current_quest = f"{mission.quest_title}: {mission.quest_description}"
         gs.current_location = mission.starting_location
+        if mission.currency_name:
+            gs.currency_name = mission.currency_name
+        if mission.starting_gold and mission.starting_gold > 0:
+            char.gold = mission.starting_gold
         if mission.first_npc_name:
             gs.active_npcs = [{"name": mission.first_npc_name,
                                "role": mission.first_npc_role,
@@ -218,7 +222,7 @@ async def on_char_review(cb: CallbackQuery, db: AsyncSession) -> None:
     except Exception as e:
         log.exception("Mission generation failed")
         user.onboarding_state = OnboardingState.CHAR_REVIEW
-        sheet = format_character_sheet(char)
+        sheet = format_character_sheet(char, user.language)
         backstory_html = md_to_html(char.backstory) if char.backstory else ""
         await cb.message.answer(
             t("CHAR_REVIEW", user.language, sheet=sheet, backstory=backstory_html),
@@ -340,7 +344,7 @@ async def _generate_char(message: Message, user: User, description: str, db: Asy
         apply_proposal(char, proposal, genre=world_desc)
         user.onboarding_state = OnboardingState.CHAR_REVIEW
 
-        sheet = format_character_sheet(char)
+        sheet = format_character_sheet(char, user.language)
         backstory = md_to_html(char.backstory) if char.backstory else (
             "<i>Тайна, скрытая даже от самого героя...</i>" if user.language == "ru"
             else "<i>A mystery, hidden even from the hero themselves...</i>"

@@ -27,6 +27,10 @@ MISSION STRUCTURE:
 
 opening_actions: Provide 4-5 short actions (3-8 words each) in {language} that are SPECIFIC to the opening scene. They should represent genuinely different choices for this exact moment. NOT generic actions like "look around" or "check inventory".
 
+CURRENCY:
+- currency_name: Set the world-appropriate currency name in {language}. Examples: "золотые монеты" (fantasy), "имперские кредиты" (Star Wars), "теневые рубли" (modern Russia underworld), "рупии" (exotic), "нуйены" (cyberpunk), "кроны" (Witcher). Use a short, immersive name that fits the world.
+- starting_gold: Set the starting money amount appropriate for the world's economy scale. Fantasy: 10-50. Sci-fi: 200-1000. Modern: 1000-10000. The number should FEEL right for the setting — a bounty hunter with 500 credits feels different from a peasant with 10 gold.
+
 Use HTML: <b>bold</b>, <i>italic</i>. NO markdown.
 
 Respond in {language}.

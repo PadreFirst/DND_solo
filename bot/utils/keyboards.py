@@ -233,15 +233,18 @@ def game_menu_keyboard(lang: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🎒 Инвентарь", callback_data="gamemenu:inv", style="primary"),
             ],
             [
+                InlineKeyboardButton(text="⚡ Способности", callback_data="gamemenu:abilities", style="primary"),
                 InlineKeyboardButton(text="📜 Задание", callback_data="gamemenu:quest", style="primary"),
+            ],
+            [
                 InlineKeyboardButton(text="🗺 Локация", callback_data="gamemenu:location", style="primary"),
-            ],
-            [
                 InlineKeyboardButton(text="🛏 Отдых", callback_data="gamemenu:rest", style="success"),
-                InlineKeyboardButton(text="🔎 Осмотр", callback_data="gamemenu:inspect", style="success"),
             ],
             [
+                InlineKeyboardButton(text="🔎 Осмотр", callback_data="gamemenu:inspect", style="success"),
                 InlineKeyboardButton(text="❓ Спросить ГМа", callback_data="gamemenu:askgm", style="success"),
+            ],
+            [
                 InlineKeyboardButton(text="🔄 Новая игра", callback_data="gamemenu:newgame", style="danger"),
             ],
             [InlineKeyboardButton(text="⬅️ Назад к игре", callback_data="gamemenu:close")],
@@ -252,15 +255,18 @@ def game_menu_keyboard(lang: str) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🎒 Inventory", callback_data="gamemenu:inv", style="primary"),
         ],
         [
+            InlineKeyboardButton(text="⚡ Abilities", callback_data="gamemenu:abilities", style="primary"),
             InlineKeyboardButton(text="📜 Quest", callback_data="gamemenu:quest", style="primary"),
+        ],
+        [
             InlineKeyboardButton(text="🗺 Location", callback_data="gamemenu:location", style="primary"),
-        ],
-        [
             InlineKeyboardButton(text="🛏 Rest", callback_data="gamemenu:rest", style="success"),
-            InlineKeyboardButton(text="🔎 Inspect", callback_data="gamemenu:inspect", style="success"),
         ],
         [
+            InlineKeyboardButton(text="🔎 Inspect", callback_data="gamemenu:inspect", style="success"),
             InlineKeyboardButton(text="❓ Ask GM", callback_data="gamemenu:askgm", style="success"),
+        ],
+        [
             InlineKeyboardButton(text="🔄 New game", callback_data="gamemenu:newgame", style="danger"),
         ],
         [InlineKeyboardButton(text="⬅️ Back to game", callback_data="gamemenu:close")],
@@ -293,3 +299,22 @@ def inventory_list_keyboard(items: list[dict]) -> InlineKeyboardMarkup:
         label = f"{name} x{qty}" if qty > 1 else name
         buttons.append([InlineKeyboardButton(text=label, callback_data=f"inv:select:{i}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def abilities_list_keyboard(abilities: list[dict], lang: str = "en") -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for i, ab in enumerate(abilities[:12]):
+        name = ab.get("name", "???")
+        atype = ab.get("type", "")
+        icon = "⚡" if atype == "active" else "🔹"
+        rows.append([InlineKeyboardButton(text=f"{icon} {name}", callback_data=f"ability:select:{i}")])
+    back_label = "⬅️ Назад" if lang == "ru" else "⬅️ Back"
+    rows.append([InlineKeyboardButton(text=back_label, callback_data="ability:back", style="primary")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def ability_detail_keyboard(idx: int, lang: str = "en") -> InlineKeyboardMarkup:
+    back_label = "⬅️ Назад" if lang == "ru" else "⬅️ Back"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=back_label, callback_data="ability:back", style="primary")],
+    ])

@@ -32,6 +32,10 @@ class GameSession(Base):
     _active_enemies: Mapped[str] = mapped_column("active_enemies", Text, default="[]")
     in_combat: Mapped[bool] = mapped_column(default=False)
 
+    _last_actions: Mapped[str] = mapped_column("last_actions", Text, default="[]")
+    _last_action_styles: Mapped[str] = mapped_column("last_action_styles", Text, default="[]")
+    currency_name: Mapped[str] = mapped_column(String(100), default="gold")
+
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
@@ -62,6 +66,28 @@ class GameSession(Base):
     @active_enemies.setter
     def active_enemies(self, value: list[dict]) -> None:
         self._active_enemies = json.dumps(value, ensure_ascii=False)
+
+    @property
+    def last_actions(self) -> list[str]:
+        try:
+            return json.loads(self._last_actions)
+        except Exception:
+            return []
+
+    @last_actions.setter
+    def last_actions(self, value: list[str]) -> None:
+        self._last_actions = json.dumps(value, ensure_ascii=False)
+
+    @property
+    def last_action_styles(self) -> list[str]:
+        try:
+            return json.loads(self._last_action_styles)
+        except Exception:
+            return []
+
+    @last_action_styles.setter
+    def last_action_styles(self, value: list[str]) -> None:
+        self._last_action_styles = json.dumps(value, ensure_ascii=False)
 
     def append_message(self, role: str, content: str) -> None:
         history = self.message_history

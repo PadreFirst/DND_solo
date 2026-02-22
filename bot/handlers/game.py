@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import time
 
 from aiogram import F, Router
@@ -21,6 +22,7 @@ from bot.services.prompt_builder import game_turn_prompt, system_prompt
 from bot.services.user_service import ensure_character, ensure_session, get_or_create_user, reset_game
 from bot.utils.formatters import (
     compact_stat_bar,
+    format_ability_card,
     format_character_sheet,
     format_inventory,
     format_quest,
@@ -28,7 +30,14 @@ from bot.utils.formatters import (
     truncate_for_telegram,
 )
 from bot.utils.i18n import t
-from bot.utils.keyboards import actions_keyboard, game_menu_keyboard, inventory_list_keyboard, rest_keyboard
+from bot.utils.keyboards import (
+    abilities_list_keyboard,
+    ability_detail_keyboard,
+    actions_keyboard,
+    game_menu_keyboard,
+    inventory_list_keyboard,
+    rest_keyboard,
+)
 
 log = logging.getLogger(__name__)
 router = Router(name="game")
@@ -54,7 +63,9 @@ async def cmd_stats(message: Message, db: AsyncSession) -> None:
     if not user.character:
         await message.answer("No active game. /start")
         return
-    await message.answer(format_character_sheet(user.character), parse_mode="HTML")
+    gs = await ensure_session(user, db)
+    cur = gs.currency_name or ""
+    await message.answer(format_character_sheet(user.character, user.language, cur), parse_mode="HTML")
 
 
 @router.message(Command("quest"))
@@ -98,23 +109,47 @@ async def on_game_menu(cb: CallbackQuery, db: AsyncSession) -> None:
         return
 
     if action == "close":
+        gs = await ensure_session(user, db)
+        saved_actions = gs.last_actions or None
+        saved_styles = gs.last_action_styles or None
         await cb.message.edit_reply_markup(
-            reply_markup=actions_keyboard(None, user.language)
+            reply_markup=actions_keyboard(saved_actions, user.language, styles=saved_styles)
         )
         await cb.answer()
         return
 
     if action == "stats":
         char = await ensure_character(user, db)
-        await cb.message.answer(format_character_sheet(char), parse_mode="HTML")
+        gs = await ensure_session(user, db)
+        cur = gs.currency_name or ""
+        await cb.message.answer(format_character_sheet(char, user.language, cur), parse_mode="HTML")
         await cb.answer()
         return
 
     if action == "inv":
         char = await ensure_character(user, db)
-        text = format_inventory(char)
+        gs = await ensure_session(user, db)
+        cur = gs.currency_name or ""
+        text = format_inventory(char, user.language, cur)
         kb = inventory_list_keyboard(char.inventory) if char.inventory else None
         await cb.message.answer(text, parse_mode="HTML", reply_markup=kb)
+        await cb.answer()
+        return
+
+    if action == "abilities":
+        char = await ensure_character(user, db)
+        abilities = char.abilities
+        if not abilities:
+            msg = "У тебя пока нет способностей." if user.language == "ru" else "You don't have any abilities yet."
+            await cb.message.answer(msg, parse_mode="HTML")
+            await cb.answer()
+            return
+        header = "⚡ <b>Способности</b>\n\n<i>Нажми, чтобы узнать подробности:</i>" if user.language == "ru" \
+            else "⚡ <b>Abilities</b>\n\n<i>Tap to see details:</i>"
+        await cb.message.answer(
+            header, parse_mode="HTML",
+            reply_markup=abilities_list_keyboard(abilities, user.language),
+        )
         await cb.answer()
         return
 
@@ -216,6 +251,40 @@ async def on_game_menu(cb: CallbackQuery, db: AsyncSession) -> None:
     await cb.answer()
 
 
+# ---- Abilities viewer (#18) ----
+
+@router.callback_query(F.data.startswith("ability:select:"))
+async def on_ability_select(cb: CallbackQuery, db: AsyncSession) -> None:
+    user = await get_or_create_user(cb.from_user.id, cb.from_user.username, db)
+    char = await ensure_character(user, db)
+    idx = int(cb.data.split(":")[2])
+    abilities = char.abilities
+    if idx >= len(abilities):
+        await cb.answer("Not found", show_alert=True)
+        return
+    text = format_ability_card(abilities[idx], user.language)
+    await cb.message.edit_text(text, parse_mode="HTML",
+                               reply_markup=ability_detail_keyboard(idx, user.language))
+    await cb.answer()
+
+
+@router.callback_query(F.data == "ability:back")
+async def on_ability_back(cb: CallbackQuery, db: AsyncSession) -> None:
+    user = await get_or_create_user(cb.from_user.id, cb.from_user.username, db)
+    char = await ensure_character(user, db)
+    abilities = char.abilities
+    if not abilities:
+        await cb.answer()
+        return
+    header = "⚡ <b>Способности</b>\n\n<i>Нажми, чтобы узнать подробности:</i>" if user.language == "ru" \
+        else "⚡ <b>Abilities</b>\n\n<i>Tap to see details:</i>"
+    await cb.message.edit_text(
+        header, parse_mode="HTML",
+        reply_markup=abilities_list_keyboard(abilities, user.language),
+    )
+    await cb.answer()
+
+
 # ---- Inline button actions ----
 
 @router.callback_query(F.data.startswith("act:"))
@@ -251,7 +320,6 @@ def _is_meta_question(text: str) -> bool:
 
 
 async def _handle_meta_question(message: Message, user, db: AsyncSession) -> None:
-    """Answer a meta-question without spending a game turn."""
     await _typing(message)
     char = await ensure_character(user, db)
     gs = await ensure_session(user, db)
@@ -308,30 +376,113 @@ async def on_game_text(message: Message, db: AsyncSession) -> None:
                                   message.text.strip(), db)
 
 
-# ---- Core game loop (single-pass) ----
+# ---- Progressive status messages (#19) ----
 
-_PROGRESS_STEPS_RU = [
-    "🎲 <i>Обрабатываю ход...</i>",
-    "🤔 <i>Думаю над ответом...</i>",
-    "📝 <i>Пишу историю...</i>",
-    "⚡ <i>Почти готово...</i>",
+_PROGRESS_POOL_RU = [
+    [
+        "🎲 <i>Бросаю кости судьбы...</i>",
+        "🎲 <i>Сверяюсь с правилами...</i>",
+        "🎲 <i>Прикидываю расклад...</i>",
+        "🎲 <i>Кости катятся по столу...</i>",
+        "🎲 <i>Раскладываю карты...</i>",
+        "🎲 <i>Обрабатываю ход...</i>",
+        "🎲 <i>Перелистываю бестиарий...</i>",
+        "🎲 <i>Сверяюсь с картой...</i>",
+    ],
+    [
+        "🤔 <i>Плету интригу...</i>",
+        "🤔 <i>Тасую карты судьбы...</i>",
+        "🤔 <i>Советуюсь с богами хаоса...</i>",
+        "🤔 <i>Прорабатываю последствия...</i>",
+        "🤔 <i>Взвешиваю исходы...</i>",
+        "🤔 <i>Вычисляю вероятности...</i>",
+        "🤔 <i>Думаю, что бы сделал злодей...</i>",
+        "🤔 <i>Сюжет густеет...</i>",
+        "🤔 <i>Ветви судьбы переплетаются...</i>",
+        "🤔 <i>NPC готовят ответ...</i>",
+    ],
+    [
+        "📝 <i>Записываю в хроники...</i>",
+        "📝 <i>Чернила сохнут на пергаменте...</i>",
+        "📝 <i>Летописец скрипит пером...</i>",
+        "📝 <i>Пишу историю...</i>",
+        "📝 <i>Формирую нарратив...</i>",
+        "📝 <i>Добавляю атмосферу...</i>",
+        "📝 <i>Мир оживает на бумаге...</i>",
+        "📝 <i>Описываю сцену...</i>",
+    ],
+    [
+        "⚡ <i>Ещё чуть-чуть...</i>",
+        "⚡ <i>Судьба почти решена...</i>",
+        "⚡ <i>Звёзды почти сошлись...</i>",
+        "⚡ <i>Финальные штрихи...</i>",
+        "⚡ <i>Дописываю последнюю строку...</i>",
+        "⚡ <i>Почти готово...</i>",
+        "⚡ <i>Осталось совсем немного...</i>",
+        "⚡ <i>Шлифую детали...</i>",
+    ],
 ]
-_PROGRESS_STEPS_EN = [
-    "🎲 <i>Processing turn...</i>",
-    "🤔 <i>Thinking...</i>",
-    "📝 <i>Writing story...</i>",
-    "⚡ <i>Almost there...</i>",
+
+_PROGRESS_POOL_EN = [
+    [
+        "🎲 <i>Rolling the dice of fate...</i>",
+        "🎲 <i>Consulting the rulebook...</i>",
+        "🎲 <i>Weighing the odds...</i>",
+        "🎲 <i>Dice clatter on the table...</i>",
+        "🎲 <i>Shuffling the deck...</i>",
+        "🎲 <i>Processing your move...</i>",
+        "🎲 <i>Flipping through the bestiary...</i>",
+        "🎲 <i>Checking the map...</i>",
+    ],
+    [
+        "🤔 <i>Weaving the plot...</i>",
+        "🤔 <i>Shuffling fate's cards...</i>",
+        "🤔 <i>Consulting the chaos gods...</i>",
+        "🤔 <i>Calculating consequences...</i>",
+        "🤔 <i>Weighing outcomes...</i>",
+        "🤔 <i>Computing probabilities...</i>",
+        "🤔 <i>Wondering what the villain would do...</i>",
+        "🤔 <i>The plot thickens...</i>",
+        "🤔 <i>Threads of destiny intertwine...</i>",
+        "🤔 <i>NPCs preparing a response...</i>",
+    ],
+    [
+        "📝 <i>Writing in the chronicles...</i>",
+        "📝 <i>Ink drying on parchment...</i>",
+        "📝 <i>The scribe's quill scratches...</i>",
+        "📝 <i>Crafting the story...</i>",
+        "📝 <i>Shaping the narrative...</i>",
+        "📝 <i>Adding atmosphere...</i>",
+        "📝 <i>The world comes alive on paper...</i>",
+        "📝 <i>Describing the scene...</i>",
+    ],
+    [
+        "⚡ <i>Almost there...</i>",
+        "⚡ <i>Fate nearly decided...</i>",
+        "⚡ <i>Stars almost aligned...</i>",
+        "⚡ <i>Final touches...</i>",
+        "⚡ <i>Writing the last line...</i>",
+        "⚡ <i>Nearly done...</i>",
+        "⚡ <i>Just a moment more...</i>",
+        "⚡ <i>Polishing details...</i>",
+    ],
 ]
+
+
+def _pick_progress_step(pool: list[list[str]], stage: int) -> str:
+    stage = min(stage, len(pool) - 1)
+    return random.choice(pool[stage])
 
 
 async def _keep_typing_with_progress(
     bot, chat_id: int, progress_msg: Message | None,
     stop_event: asyncio.Event, lang: str = "ru",
 ) -> None:
-    steps = _PROGRESS_STEPS_RU if lang == "ru" else _PROGRESS_STEPS_EN
-    step_idx = 0
+    pool = _PROGRESS_POOL_RU if lang == "ru" else _PROGRESS_POOL_EN
+    stage = 0
     elapsed = 0.0
     interval = 3.5
+    stage_thresholds = [0.0, 3.5, 7.0, 12.0]
 
     while not stop_event.is_set():
         try:
@@ -343,14 +494,20 @@ async def _keep_typing_with_progress(
             return
         except asyncio.TimeoutError:
             elapsed += interval
-            next_idx = min(int(elapsed / interval), len(steps) - 1)
-            if next_idx != step_idx and progress_msg:
-                step_idx = next_idx
+            new_stage = stage
+            for i, thresh in enumerate(stage_thresholds):
+                if elapsed >= thresh:
+                    new_stage = i
+            if new_stage != stage and progress_msg:
+                stage = new_stage
+                text = _pick_progress_step(pool, stage)
                 try:
-                    await progress_msg.edit_text(steps[step_idx], parse_mode="HTML")
+                    await progress_msg.edit_text(text, parse_mode="HTML")
                 except Exception:
                     pass
 
+
+# ---- Core game loop (single-pass) ----
 
 async def _process_player_action(
     reply_target: Message, telegram_id: int, username: str | None,
@@ -371,15 +528,14 @@ async def _process_player_action(
     sys_prompt = system_prompt(user.language, user.content_tier.value)
     context = await build_context(user, char, gs, db)
 
-    # --- #8: Send placeholder immediately for perceived speed ---
     lang = user.language
-    steps = _PROGRESS_STEPS_RU if lang == "ru" else _PROGRESS_STEPS_EN
+    pool = _PROGRESS_POOL_RU if lang == "ru" else _PROGRESS_POOL_EN
+    first_msg = _pick_progress_step(pool, 0)
     try:
-        progress_msg = await reply_target.answer(steps[0], parse_mode="HTML")
+        progress_msg = await reply_target.answer(first_msg, parse_mode="HTML")
     except Exception:
         progress_msg = None
 
-    # Start typing + progressive status updates in background
     stop_typing = asyncio.Event()
     typing_task = asyncio.create_task(
         _keep_typing_with_progress(
@@ -387,7 +543,6 @@ async def _process_player_action(
         )
     )
 
-    # --- Single Gemini call (system prompt separated for caching) ---
     try:
         decision: GameResponse = await generate_structured(
             game_turn_prompt(context, player_action, language=user.language),
@@ -449,16 +604,24 @@ async def _process_player_action(
                 char, decision.attack_target_ac,
                 decision.attack_damage_dice or "1d8", decision.attack_ability or "strength", True,
             )
-            mechanics_lines.append(atk.display_localized(lang))
+            atk_display = atk.display_localized(lang)
+            t_hp = decision.attack_target_hp
+            t_max = decision.attack_target_max_hp
+            if t_hp > 0 and t_max > 0:
+                atk_display += f" (HP: {t_hp}/{t_max})"
+            mechanics_lines.append(atk_display)
             had_checks = True
             if atk.hit:
                 any_succeeded = True
+                if t_hp > 0 and t_max > 0 and atk.damage:
+                    remaining = max(0, t_hp - atk.damage)
+                    target_lbl = "HP цели" if lang == "ru" else "Target HP"
+                    mechanics_lines.append(f"⚔️ → {target_lbl}: {remaining}/{t_max}")
             else:
                 any_failed = True
         except Exception:
             log.warning("Attack failed: ac=%s dice=%s", decision.attack_target_ac, decision.attack_damage_dice)
 
-    # --- #1: Show NPC damage with HP result ---
     for npc in decision.npc_actions:
         if npc.damage_dice:
             try:
@@ -469,7 +632,6 @@ async def _process_player_action(
             except Exception:
                 log.warning("NPC damage failed: %s", npc.damage_dice)
 
-    # --- #1: Show stat_changes HP with result ---
     for sc in decision.stat_changes:
         if sc.stat == "current_hp" and sc.delta < 0:
             hp_line = engine.apply_damage_verbose(char, abs(sc.delta), lang)
@@ -493,12 +655,13 @@ async def _process_player_action(
         char.inventory = engine.merge_inventory(char.inventory, changes)
         char.inventory = engine.ensure_ammo(char.inventory)
 
+    currency = gs.currency_name or ("зол." if lang == "ru" else "g")
     if decision.gold_change:
         char.gold = max(0, char.gold + decision.gold_change)
         sign = "+" if decision.gold_change > 0 else ""
-        mechanics_lines.append(f"💰 {sign}{decision.gold_change}g")
+        mechanics_lines.append(f"💰 {sign}{decision.gold_change} {currency}")
 
-    # --- #5: Smart XP fallback ---
+    # --- Smart XP fallback ---
     xp_to_grant = decision.xp_gained
     if xp_to_grant == 0 and had_checks:
         had_attack = bool(decision.attack_target_ac and decision.attack_target_ac > 0)
@@ -572,8 +735,7 @@ async def _process_player_action(
                 else "▶️ <i>What do you do?</i>")
         parts.append(hint)
 
-    # --- #6: Compact stat bar ---
-    parts.append(f"<code>{compact_stat_bar(char)}</code>")
+    parts.append(f"<code>{compact_stat_bar(char, lang, currency)}</code>")
 
     if leveled_up:
         parts.append(t("LEVEL_UP", lang, name=char.name, level=str(char.level),
@@ -584,14 +746,31 @@ async def _process_player_action(
     elapsed = int((time.monotonic() - start_time) * 1000)
     log.info("Turn %d user %d: %dms", gs.turn_number, user.telegram_id, elapsed)
 
-    # --- #7: Action buttons ---
-    final_actions = decision.available_actions if decision.available_actions else None
-    final_styles = decision.action_styles if decision.action_styles else None
+    # --- #20: Pick actions based on check outcome ---
+    if had_checks:
+        if any_failed and not any_succeeded and decision.on_failure_actions:
+            final_actions = decision.on_failure_actions
+            final_styles = decision.on_failure_styles
+        elif any_succeeded and not any_failed and decision.on_success_actions:
+            final_actions = decision.on_success_actions
+            final_styles = decision.on_success_styles
+        elif any_succeeded and any_failed:
+            final_actions = decision.on_success_actions or decision.on_failure_actions or decision.available_actions
+            final_styles = decision.on_success_styles or decision.on_failure_styles or decision.action_styles
+        else:
+            final_actions = decision.available_actions if decision.available_actions else None
+            final_styles = decision.action_styles if decision.action_styles else None
+    else:
+        final_actions = decision.available_actions if decision.available_actions else None
+        final_styles = decision.action_styles if decision.action_styles else None
+
+    # --- #22: Save actions in session for menu restore ---
+    gs.last_actions = final_actions or []
+    gs.last_action_styles = final_styles or []
 
     full_text = truncate_for_telegram("\n\n".join(parts))
     kb = actions_keyboard(final_actions, lang, styles=final_styles)
 
-    # --- #8: Edit placeholder with final result ---
     sent = False
     if progress_msg:
         try:

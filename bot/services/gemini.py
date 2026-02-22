@@ -165,8 +165,14 @@ class GameResponse(BaseModel):
     gold_change: int = 0
     location_change: str = ""
     quest_update: str = ""
+    attack_target_hp: int = Field(default=0, description="Current HP of attack target (if attacking)")
+    attack_target_max_hp: int = Field(default=0, description="Max HP of attack target (if attacking)")
     available_actions: list[str] = Field(default_factory=list)
     action_styles: list[str] = Field(default_factory=list, description="Style per action: 'combat','dialogue','explore','safe'. Same order as available_actions.")
+    on_success_actions: list[str] = Field(default_factory=list, description="3-4 actions if checks SUCCEED.")
+    on_success_styles: list[str] = Field(default_factory=list, description="Styles for on_success_actions.")
+    on_failure_actions: list[str] = Field(default_factory=list, description="3-4 actions if checks FAIL.")
+    on_failure_styles: list[str] = Field(default_factory=list, description="Styles for on_failure_actions.")
     is_combat_start: bool = False
     is_combat_end: bool = False
     important_event: str = ""
@@ -203,6 +209,8 @@ class MissionProposal(BaseModel):
     first_npc_role: str = ""
     first_npc_personality: str = ""
     opening_actions: list[str] = Field(default_factory=list)
+    currency_name: str = Field(default="gold", description="World-appropriate currency name: 'imperial credits', 'gold coins', 'shadow rubles', etc.")
+    starting_gold: int = Field(default=10, description="Starting money amount appropriate for the world scale: 10 for fantasy gold, 500 for sci-fi credits, 5000 for modern currency")
 
 
 class PersonalizationAnalysis(BaseModel):
