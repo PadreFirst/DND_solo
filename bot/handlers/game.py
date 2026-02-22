@@ -721,9 +721,25 @@ async def _process_player_action(
         mechanics_lines.append(f"✨ +{xp_to_grant} XP")
 
     if decision.location_change:
-        gs.current_location = decision.location_change
-        if decision.location_description:
-            gs.location_description = decision.location_description
+        _lo = player_action.lower()
+        _MOVE_HINTS_RU = ("идти", "пойти", "бежать", "ползти", "лезть", "спуститься",
+                          "подняться", "перейти", "войти", "выйти", "свернуть", "двигаться",
+                          "отступить", "бежать", "убежать", "перебраться", "прыгнуть",
+                          "к выходу", "в канал", "в коридор", "к двери", "в вентиляц",
+                          "в канализац", "на склад", "в люк", "через люк", "к лестниц",
+                          "в кабельн", "flee", "run", "go ", "move", "enter", "exit",
+                          "climb", "jump", "crawl", "descend", "ascend", "head to")
+        looks_like_move = any(h in _lo for h in _MOVE_HINTS_RU)
+        forced_by_narrative = decision.on_failure and decision.location_change
+        if looks_like_move or forced_by_narrative:
+            gs.current_location = decision.location_change
+            if decision.location_description:
+                gs.location_description = decision.location_description
+        else:
+            log.warning("Blocked spurious location_change=%r on action=%r",
+                        decision.location_change, player_action)
+            decision.location_change = ""
+            decision.location_description = ""
     if decision.quest_update:
         gs.current_quest = decision.quest_update
     if decision.is_combat_start:
@@ -781,7 +797,7 @@ async def _process_player_action(
 
     if leveled_up:
         parts.append(t("LEVEL_UP", lang, name=char.name, level=str(char.level),
-                        old_hp=str(old_hp), new_hp=str(char.max_hp), prof=str(char.proficiency_bonus)))
+                        old_hp=str(old_hp), new_hp=str(char.max_hp)))
     if char.current_hp <= 0:
         parts.append(t("DEATH", lang, name=char.name))
 

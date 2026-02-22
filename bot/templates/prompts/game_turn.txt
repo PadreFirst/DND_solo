@@ -17,10 +17,13 @@ If there are NO uncertain actions:
 If MULTIPLE checks: on_success = all succeed, on_failure = all fail. Code handles mixed results. Prefer ONE key check per turn.
 
 === LOCATION ===
+"location_change" ONLY when the player PHYSICALLY MOVES to a new place or is forcibly relocated (explosion, trap, teleport).
+Healing, talking, examining, crafting, hiding in the SAME room = NO location_change. NEVER.
+
 When setting "location_change": MUST fill "location_description" (3-5 sentences):
 - Layout, exits (doors/windows/hatches/vents + where they lead), interactive objects (consoles/crates/cover/machinery), hazards (explosives/gas/electrical panels/toxins), atmosphere.
 - This is a TACTICAL BRIEFING — the player makes life-or-death decisions from it.
-- Does NOT count toward word limit. If no location change, leave empty.
+- Does NOT count toward word limit. If no location change, leave BOTH fields empty.
 
 === ATTACK TARGET ===
 When requesting an attack: fill attack_target_hp and attack_target_max_hp so the player sees how tough the enemy is.
@@ -31,7 +34,11 @@ Before generating actions, RE-READ [SYSTEM INFO] above. The character's COMPLETE
 - You may ONLY suggest abilities listed in Active/Passive Abilities.
 - NEVER add "(if you have one)" or any parenthetical — if you're unsure, DON'T suggest it.
 
-ACTIONS MUST MATCH THE NARRATIVE. If the narrative describes a fork (left/right), the actions MUST include both directions. If the narrative describes an NPC speaking, actions MUST include a dialogue option. The player's choices come from YOUR buttons.
+ACTIONS MUST MATCH THE NARRATIVE.
+- If the narrative/location lists exits (e.g., 3 doors/hatches/corridors), the actions MUST offer ALL of them — not just one or two.
+- If the narrative describes a fork (left/right), the actions MUST include both directions.
+- If an NPC is speaking, actions MUST include a dialogue option.
+The player's choices come from YOUR buttons — if an exit exists in the description but has no button, the player CANNOT go there.
 
 If dice checks exist → fill on_success_actions/styles + on_failure_actions/styles. Leave available_actions empty.
 If no dice checks → fill available_actions/styles. Leave on_success/failure empty.
