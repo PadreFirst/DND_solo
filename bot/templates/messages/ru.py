@@ -68,7 +68,7 @@ GAME_START = (
     "▶️ <i>Что делаешь?</i>"
 )
 
-LEVEL_UP = "🎉 <b>НОВЫЙ УРОВЕНЬ!</b>\n\n{name} → Lv.{level}\nHP: {old_hp} → {new_hp} | Мастерство: +{prof}"
+LEVEL_UP = "🎉 <b>НОВЫЙ УРОВЕНЬ!</b>\n\n{name} → Lv.{level}\nHP: {old_hp} → {new_hp}"
 DEATH = "💀 <b>{name} погиб...</b>\n\nТьма окутывает тебя...\n\n/start — новое приключение"
 ERROR = "⚠️ Что-то пошло не так. Попробуй ещё раз или /start"
 MENU_HELP = (

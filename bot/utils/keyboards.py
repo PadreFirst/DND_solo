@@ -214,14 +214,22 @@ def _strip_html(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text).strip()
 
 
+_DISCLAIMER_PATTERNS = ("если есть", "if you have", "нет в", "нет у", "если ", "if ", "maybe", "возможно")
+
+
 def _clean_action(text: str) -> str:
     """Strip HTML, trim to fit Telegram button. Validates completeness."""
+    import re
     clean = _strip_html(text)
     clean = clean.strip("«»\"'")
 
-    # parenthetical = AI disclaimer about item/ability availability → reject entirely
-    if "(" in clean:
-        return ""
+    # check parenthetical content: disclaimer → reject, ability name → strip parens and keep
+    paren_match = re.search(r"\(([^)]*)\)?", clean)
+    if paren_match:
+        inside = paren_match.group(1).lower()
+        if any(p in inside for p in _DISCLAIMER_PATTERNS):
+            return ""
+        clean = re.sub(r"\s*\([^)]*\)?\s*", " ", clean).strip()
 
     # reject bare verbs (single word with no object/target)
     if " " not in clean.strip():
