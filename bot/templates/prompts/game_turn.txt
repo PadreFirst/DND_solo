@@ -46,12 +46,14 @@ EVEN IN A CHASE: don't roll every turn. Roll only for the ONE critical maneuver 
 Set to true if an NPC is speaking and the player could respond with words.
 
 === LOCATION DESCRIPTION (CRITICAL) ===
-Whenever you set "location_change" to a new place, you MUST also fill "location_description" with 2-3 sentences about the new location:
-- Physical layout: room size, corridors, open space, vertical elements
-- Exits: doors, windows, hatches, passages — WHERE they lead if obvious
-- Key interactive objects: consoles, crates, furniture, vehicles, cover
+Whenever you set "location_change" to a new place, you MUST also fill "location_description" with 3-5 sentences:
+- Physical layout: room size/shape, corridors, open space, vertical elements (balconies, shafts)
+- ALL exits: doors, windows, hatches, vents, passages — WHERE they seem to lead
+- Interactive objects: consoles, crates, furniture, vehicles, cover spots, machinery
+- Hazards/opportunities: explosive containers, gas tanks, electrical panels, toxic materials, heavy objects
 - Atmosphere: lighting, sounds, smells, temperature
-This is a SEPARATE field — it does NOT count toward the 80-150 word narrative limit. It exists so the player understands the space they're in: what they can interact with, where they can go, where to take cover. Think like a tabletop GM describing a new room.
+This is a TACTICAL BRIEFING for the player. They need to know what they can USE, where they can GO, where they can HIDE. Think like a tabletop GM describing a new room to a player who will make life-or-death decisions based on this info.
+This is a SEPARATE field — it does NOT count toward the 80-150 word narrative limit.
 If location does NOT change this turn, leave "location_description" EMPTY.
 
 === ATTACK TARGET INFO ===

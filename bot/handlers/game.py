@@ -172,11 +172,35 @@ async def on_game_menu(cb: CallbackQuery, db: AsyncSession) -> None:
     if action == "locinfo":
         gs = await ensure_session(user, db)
         desc = gs.location_description
-        loc = gs.current_location
+        loc = gs.current_location or ("Неизвестно" if user.language == "ru" else "Unknown")
+
+        if not desc:
+            wait_msg = "📍 <i>Осматриваю локацию...</i>" if user.language == "ru" else "📍 <i>Scanning location...</i>"
+            await cb.message.answer(wait_msg, parse_mode="HTML")
+            char = await ensure_character(user, db)
+            loc_prompt = (
+                f"Describe the location '{loc}' for the player. "
+                f"Character: {char.name}, {char.char_class}. Context: {gs.current_quest or 'exploring'}.\n"
+                f"Write 3-5 sentences in {user.language}:\n"
+                f"- Physical layout: room size, shape, corridors/open space\n"
+                f"- ALL exits: doors, windows, hatches, vents, passages — and where they seem to lead\n"
+                f"- Interactive objects: consoles, crates, cover, machinery, containers, weapons, furniture\n"
+                f"- Hazards/opportunities: explosive containers, electrical panels, toxic materials, fire sources\n"
+                f"- Atmosphere: lighting, sounds, smells\n"
+                f"This is a tactical briefing, not prose. Be specific and useful. Use HTML formatting."
+            )
+            try:
+                desc = await generate_narrative(
+                    loc_prompt, content_tier=user.content_tier.value,
+                )
+                gs.location_description = desc
+            except Exception:
+                desc = ""
+
         if desc:
             text = f"📍 <b>{loc}</b>\n\n{md_to_html(desc)}"
         else:
-            text = f"📍 <b>{loc}</b>" if loc else ("📍 Локация неизвестна" if user.language == "ru" else "📍 Location unknown")
+            text = f"📍 <b>{loc}</b>"
         await cb.message.answer(truncate_for_telegram(text, 3800), parse_mode="HTML")
         await cb.answer()
         return

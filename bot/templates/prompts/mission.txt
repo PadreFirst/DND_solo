@@ -24,6 +24,12 @@ MISSION STRUCTURE:
 3. FIRST NPC — Interesting character (name in first_npc_name, NOT in the opening_scene text).
 4. MYSTERY — A deeper thread. Plant the first subtle clue.
 5. STARTING LOCATION — Vivid, specific to the world.
+6. STARTING LOCATION DESCRIPTION — Fill starting_location_description with 2-3 sentences describing the physical space:
+   - Layout: room size, shape, what's around
+   - Exits: doors, windows, hatches, corridors, vents — and where they lead
+   - Interactive objects: consoles, crates, cover, machinery, containers, furniture
+   - Hazards/opportunities: gas canisters, electrical panels, toxic materials, fire
+   The player uses this to make TACTICAL decisions. "Workshop" tells them nothing. "Cramped workshop, 4×6m, one blast door (locked), ventilation shaft in ceiling, shelves with droid parts, oil drums near the wall" — that's useful.
 
 opening_actions: Provide 4-5 short actions (3-8 words each) in {language} that are SPECIFIC to the opening scene. They should represent genuinely different choices for this exact moment. NOT generic actions like "look around" or "check inventory".
 

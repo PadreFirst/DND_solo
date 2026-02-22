@@ -235,6 +235,8 @@ async def on_char_review(cb: CallbackQuery, db: AsyncSession) -> None:
 
         gs.current_quest = f"{mission.quest_title}: {mission.quest_description}"
         gs.current_location = mission.starting_location
+        if mission.starting_location_description:
+            gs.location_description = mission.starting_location_description
         if mission.currency_name:
             gs.currency_name = mission.currency_name
         if mission.starting_gold and mission.starting_gold > 0:

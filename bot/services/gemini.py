@@ -213,6 +213,7 @@ class MissionProposal(BaseModel):
     quest_description: str = ""
     opening_scene: str = ""
     starting_location: str = ""
+    starting_location_description: str = Field(default="", description="2-3 sentences: layout, exits, cover, interactive objects, atmosphere of the starting location")
     hook_mystery: str = ""
     first_npc_name: str = ""
     first_npc_role: str = ""
