@@ -215,15 +215,21 @@ def _strip_html(text: str) -> str:
 
 
 def _clean_action(text: str) -> str:
-    """Strip HTML, trim to fit Telegram button (max 25 visible chars)."""
+    """Strip HTML, trim to fit Telegram button. Ensures no dangling adjectives."""
     clean = _strip_html(text)
     clean = clean.strip("«»\"'")
-    if len(clean) <= 25:
+    if len(clean) <= 32:
         return clean
-    cut = clean[:25]
+    cut = clean[:32]
     last_space = cut.rfind(" ")
     if last_space > 10:
-        return cut[:last_space]
+        cut = cut[:last_space]
+    # drop trailing adjective-like words (Russian: -ый, -ий, -ой, -ая, -ые, -ое, -ую, -ей)
+    words = cut.split()
+    if len(words) > 2:
+        last = words[-1].lower()
+        if any(last.endswith(s) for s in ("ый", "ий", "ой", "ая", "ые", "ое", "ую", "ей", "ых", "их")):
+            cut = " ".join(words[:-1])
     return cut
 
 

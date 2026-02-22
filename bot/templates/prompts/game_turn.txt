@@ -92,11 +92,28 @@ If there are NO dice checks:
 - Fill "available_actions" + "action_styles" with 3-4 actions for the current scene.
 - Leave on_success/on_failure actions EMPTY.
 
-ACTION FORMAT — STRICT LENGTH LIMIT:
-- Each action: verb + 1-2 words, MAX 25 characters, MAX 4 words. In {language}.
-- Examples (RU): "Атаковать мечом", "Спрятаться в тени", "Обмануть стражу", "Осмотреть комнату"
-- Examples (EN): "Strike with sword", "Hide in shadows", "Bluff the guard", "Search the room"
-- NEVER exceed 25 characters — buttons are truncated in Telegram UI.
+ACTION FORMAT — CRITICAL RULES:
+Every action MUST be a COMPLETE, understandable phrase. The player must understand exactly what will happen.
+
+FORMULA: verb + object (+ optional short context). MAX 30 characters, MAX 4 words. In {language}.
+
+GOOD (complete, clear):
+- "Атаковать мечом" ✓ (verb + object)
+- "Спрятаться в тени" ✓ (verb + context)
+- "Обмануть стражу" ✓ (verb + target)
+- "Взять бластер" ✓ (verb + object)
+- "Применить Силу" ✓ (verb + ability)
+- "Бежать к выходу" ✓ (verb + direction)
+
+BAD (incomplete, forbidden):
+- "Схватить спрятанные" ✗ (спрятанные ЧТО? adjective without noun)
+- "Активировать" ✗ (activate WHAT? no object)
+- "Подготовить плазменный" ✗ (плазменный ЧТО? cut-off adjective)
+- "Использовать свои" ✗ (свои ЧТО? dangling possessive)
+
+RULE: If you can't fit adjective+noun, DROP the adjective. "Взять бластер" > "Взять плазменный бластер".
+RULE: Every action MUST contain a noun or a clear target. Bare verbs and dangling adjectives are FORBIDDEN.
+
 Include:
 - At least 1 cautious/safe option
 - At least 1 bold/risky option
