@@ -158,13 +158,16 @@ async def on_game_menu(cb: CallbackQuery, db: AsyncSession) -> None:
         char = await ensure_character(user, db)
         gs = await ensure_session(user, db)
         ctx = await build_context(user, char, gs, db)
+        sys_instr = system_prompt(user.language, user.content_tier.value)
         prompt = (
             f"{ctx}\n\nThe player wants a tactical assessment of the current situation. "
             f"Describe what they see, hear, smell. Mention any threats, opportunities, "
             f"or notable details. Be specific. Write in {user.language}. Use HTML formatting."
         )
         try:
-            text = await generate_narrative(prompt, content_tier=user.content_tier.value)
+            text = await generate_narrative(
+                prompt, content_tier=user.content_tier.value, system_instruction=sys_instr,
+            )
             text = md_to_html(text)
             await cb.message.answer(truncate_for_telegram(f"🔎 {text}", 3800), parse_mode="HTML")
         except Exception as e:
@@ -179,6 +182,7 @@ async def on_game_menu(cb: CallbackQuery, db: AsyncSession) -> None:
         char = await ensure_character(user, db)
         gs = await ensure_session(user, db)
         ctx = await build_context(user, char, gs, db)
+        sys_instr = system_prompt(user.language, user.content_tier.value)
         prompt = (
             f"{ctx}\n\nThe player asks the GM for advice. Provide helpful mechanical tips: "
             f"suggest what skills/items might be useful, remind them of abilities they can use, "
@@ -186,7 +190,9 @@ async def on_game_menu(cb: CallbackQuery, db: AsyncSession) -> None:
             f"Write in {user.language}. Use HTML formatting."
         )
         try:
-            text = await generate_narrative(prompt, content_tier=user.content_tier.value)
+            text = await generate_narrative(
+                prompt, content_tier=user.content_tier.value, system_instruction=sys_instr,
+            )
             text = md_to_html(text)
             await cb.message.answer(truncate_for_telegram(f"❓ {text}", 3800), parse_mode="HTML")
         except Exception as e:
@@ -250,6 +256,7 @@ async def _handle_meta_question(message: Message, user, db: AsyncSession) -> Non
     char = await ensure_character(user, db)
     gs = await ensure_session(user, db)
     ctx = await build_context(user, char, gs, db)
+    sys_instr = system_prompt(user.language, user.content_tier.value)
     question = message.text.strip()
     for prefix in _GM_PREFIXES:
         if question.lower().startswith(prefix):
@@ -263,7 +270,9 @@ async def _handle_meta_question(message: Message, user, db: AsyncSession) -> Non
         f"Write in {user.language}. Use HTML formatting. Be concise (2-4 sentences)."
     )
     try:
-        text = await generate_narrative(prompt, content_tier=user.content_tier.value)
+        text = await generate_narrative(
+            prompt, content_tier=user.content_tier.value, system_instruction=sys_instr,
+        )
         text = md_to_html(text)
         label = "ГМ" if user.language == "ru" else "GM"
         await message.answer(
@@ -301,18 +310,46 @@ async def on_game_text(message: Message, db: AsyncSession) -> None:
 
 # ---- Core game loop (single-pass) ----
 
-async def _keep_typing(bot, chat_id: int, stop_event: asyncio.Event) -> None:
-    """Send typing indicator every 4 seconds until stop_event is set."""
+_PROGRESS_STEPS_RU = [
+    "🎲 <i>Обрабатываю ход...</i>",
+    "🤔 <i>Думаю над ответом...</i>",
+    "📝 <i>Пишу историю...</i>",
+    "⚡ <i>Почти готово...</i>",
+]
+_PROGRESS_STEPS_EN = [
+    "🎲 <i>Processing turn...</i>",
+    "🤔 <i>Thinking...</i>",
+    "📝 <i>Writing story...</i>",
+    "⚡ <i>Almost there...</i>",
+]
+
+
+async def _keep_typing_with_progress(
+    bot, chat_id: int, progress_msg: Message | None,
+    stop_event: asyncio.Event, lang: str = "ru",
+) -> None:
+    steps = _PROGRESS_STEPS_RU if lang == "ru" else _PROGRESS_STEPS_EN
+    step_idx = 0
+    elapsed = 0.0
+    interval = 3.5
+
     while not stop_event.is_set():
         try:
             await bot.send_chat_action(chat_id, ChatAction.TYPING)
         except Exception:
             pass
         try:
-            await asyncio.wait_for(stop_event.wait(), timeout=4)
+            await asyncio.wait_for(stop_event.wait(), timeout=interval)
             return
         except asyncio.TimeoutError:
-            pass
+            elapsed += interval
+            next_idx = min(int(elapsed / interval), len(steps) - 1)
+            if next_idx != step_idx and progress_msg:
+                step_idx = next_idx
+                try:
+                    await progress_msg.edit_text(steps[step_idx], parse_mode="HTML")
+                except Exception:
+                    pass
 
 
 async def _process_player_action(
@@ -333,28 +370,30 @@ async def _process_player_action(
 
     sys_prompt = system_prompt(user.language, user.content_tier.value)
     context = await build_context(user, char, gs, db)
-    full_context = f"{sys_prompt}\n\n{context}"
 
     # --- #8: Send placeholder immediately for perceived speed ---
     lang = user.language
-    placeholder_text = "🎲 <i>Обрабатываю ход...</i>" if lang == "ru" else "🎲 <i>Processing turn...</i>"
+    steps = _PROGRESS_STEPS_RU if lang == "ru" else _PROGRESS_STEPS_EN
     try:
-        progress_msg = await reply_target.answer(placeholder_text, parse_mode="HTML")
+        progress_msg = await reply_target.answer(steps[0], parse_mode="HTML")
     except Exception:
         progress_msg = None
 
-    # Start typing indicator in background
+    # Start typing + progressive status updates in background
     stop_typing = asyncio.Event()
     typing_task = asyncio.create_task(
-        _keep_typing(reply_target.bot, reply_target.chat.id, stop_typing)
+        _keep_typing_with_progress(
+            reply_target.bot, reply_target.chat.id, progress_msg, stop_typing, lang
+        )
     )
 
-    # --- Single Gemini call ---
+    # --- Single Gemini call (system prompt separated for caching) ---
     try:
         decision: GameResponse = await generate_structured(
-            game_turn_prompt(full_context, player_action, language=user.language),
+            game_turn_prompt(context, player_action, language=user.language),
             GameResponse, content_tier=user.content_tier.value,
             max_tokens=4096,
+            system_instruction=sys_prompt,
         )
     except Exception as e:
         stop_typing.set()
@@ -459,10 +498,22 @@ async def _process_player_action(
         sign = "+" if decision.gold_change > 0 else ""
         mechanics_lines.append(f"💰 {sign}{decision.gold_change}g")
 
-    # --- #5: Auto XP fallback ---
+    # --- #5: Smart XP fallback ---
     xp_to_grant = decision.xp_gained
     if xp_to_grant == 0 and had_checks:
-        xp_to_grant = 25
+        had_attack = bool(decision.attack_target_ac and decision.attack_target_ac > 0)
+        had_saves = bool(decision.saving_throws)
+        took_damage = any(npc.damage_dice for npc in decision.npc_actions) or any(
+            sc.stat == "current_hp" and sc.delta < 0 for sc in decision.stat_changes
+        )
+        if took_damage:
+            xp_to_grant = 75
+        elif had_attack:
+            xp_to_grant = 50
+        elif had_saves:
+            xp_to_grant = 50
+        else:
+            xp_to_grant = 25
 
     leveled_up = False
     old_hp = char.max_hp

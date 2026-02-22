@@ -51,6 +51,7 @@ async def _call_gemini(
     contents: list[dict],
     generation_config: dict | None = None,
     safety_settings: list[dict] | None = None,
+    system_instruction: str | None = None,
 ) -> dict:
     client = await _get_client()
     models_to_try = [model]
@@ -66,6 +67,8 @@ async def _call_gemini(
                 body["generationConfig"] = generation_config
             if safety_settings:
                 body["safetySettings"] = safety_settings
+            if system_instruction:
+                body["systemInstruction"] = {"parts": [{"text": system_instruction}]}
 
             resp = await client.post(url, json=body)
             data = resp.json()
@@ -463,6 +466,7 @@ async def generate_structured(
     content_tier: str = "full",
     heavy: bool = False,
     max_tokens: int = 8192,
+    system_instruction: str | None = None,
 ) -> BaseModel:
     model = _pick_model(heavy)
     example = _make_example(schema)
@@ -486,6 +490,7 @@ async def generate_structured(
                     "maxOutputTokens": max_tokens,
                 },
                 safety_settings=SAFETY_OFF,
+                system_instruction=system_instruction,
             )
             text = _extract_text(data)
             log.debug("Gemini structured response (attempt %d): %s", attempt + 1, text[:500])
@@ -538,7 +543,9 @@ async def generate_structured(
     raise GeminiError(f"structured/{schema.__name__}", last_error or Exception("all attempts failed"))
 
 
-async def generate_narrative(prompt: str, content_tier: str = "full") -> str:
+async def generate_narrative(
+    prompt: str, content_tier: str = "full", system_instruction: str | None = None,
+) -> str:
     model = _pick_model(heavy=False)
     log.debug("Gemini narrative [%s]", model)
     try:
@@ -547,6 +554,7 @@ async def generate_narrative(prompt: str, content_tier: str = "full") -> str:
             contents=[{"parts": [{"text": prompt}]}],
             generation_config={"temperature": 1.0, "maxOutputTokens": 2048},
             safety_settings=SAFETY_OFF,
+            system_instruction=system_instruction,
         )
         return _extract_text(data)
     except GeminiError:
