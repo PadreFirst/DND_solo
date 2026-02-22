@@ -215,22 +215,35 @@ def _strip_html(text: str) -> str:
 
 
 def _clean_action(text: str) -> str:
-    """Strip HTML, trim to fit Telegram button. Ensures no dangling adjectives."""
+    """Strip HTML, trim to fit Telegram button. Validates completeness."""
     clean = _strip_html(text)
     clean = clean.strip("«»\"'")
+
+    # reject bare verbs (single word with no object/target)
+    if " " not in clean.strip():
+        return ""
+
     if len(clean) <= 32:
-        return clean
-    cut = clean[:32]
-    last_space = cut.rfind(" ")
-    if last_space > 10:
-        cut = cut[:last_space]
+        result = clean
+    else:
+        cut = clean[:32]
+        last_space = cut.rfind(" ")
+        if last_space > 10:
+            cut = cut[:last_space]
+        result = cut
+
     # drop trailing adjective-like words (Russian: -ый, -ий, -ой, -ая, -ые, -ое, -ую, -ей)
-    words = cut.split()
+    words = result.split()
     if len(words) > 2:
         last = words[-1].lower()
         if any(last.endswith(s) for s in ("ый", "ий", "ой", "ая", "ые", "ое", "ую", "ей", "ых", "их")):
-            cut = " ".join(words[:-1])
-    return cut
+            result = " ".join(words[:-1])
+
+    # after trimming, if only one word remains — it's incomplete
+    if " " not in result.strip():
+        return ""
+
+    return result
 
 
 def _trim_callback(prefix: str, text: str) -> str:
