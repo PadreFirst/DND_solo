@@ -199,7 +199,7 @@ async def maybe_summarize(session: GameSession, content_tier: str) -> None:
         f"New messages to integrate:\n{old_text}"
     )
 
-    new_summary = await generate_text(prompt, content_tier=content_tier, temperature=0.3)
+    new_summary = await generate_text(prompt, content_tier=content_tier, temperature=0.3, light=True)
     session.summary = new_summary.strip()
     session.message_history = history[cutoff:]
     log.info("Summarized %d old messages for user session %d", cutoff, session.user_id)

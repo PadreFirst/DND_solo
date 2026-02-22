@@ -15,6 +15,7 @@ class Settings(BaseSettings):
 
     gemini_model: str = "gemini-2.0-flash"
     gemini_model_heavy: str = ""
+    gemini_model_light: str = ""
     gemini_proxy: str = ""
 
     max_recent_messages: int = 12

@@ -32,9 +32,11 @@ async def _get_client() -> httpx.AsyncClient:
     return _client
 
 
-def _pick_model(heavy: bool = False) -> str:
+def _pick_model(heavy: bool = False, light: bool = False) -> str:
     if heavy and settings.gemini_model_heavy:
         return settings.gemini_model_heavy
+    if light and settings.gemini_model_light:
+        return settings.gemini_model_light
     return settings.gemini_model
 
 
@@ -564,8 +566,9 @@ async def generate_structured(
 
 async def generate_narrative(
     prompt: str, content_tier: str = "full", system_instruction: str | None = None,
+    light: bool = False,
 ) -> str:
-    model = _pick_model(heavy=False)
+    model = _pick_model(light=light)
     log.debug("Gemini narrative [%s]", model)
     try:
         data = await _call_gemini(
@@ -588,10 +591,11 @@ async def generate_text(
     content_tier: str = "full",
     temperature: float = 0.9,
     max_tokens: int = 4096,
+    light: bool = False,
 ) -> str:
     try:
         data = await _call_gemini(
-            model=_pick_model(heavy=False),
+            model=_pick_model(light=light),
             contents=[{"parts": [{"text": prompt}]}],
             generation_config={"temperature": temperature, "maxOutputTokens": max_tokens},
             safety_settings=SAFETY_OFF,

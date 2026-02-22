@@ -191,7 +191,7 @@ async def on_game_menu(cb: CallbackQuery, db: AsyncSession) -> None:
             )
             try:
                 desc = await generate_narrative(
-                    loc_prompt, content_tier=user.content_tier.value,
+                    loc_prompt, content_tier=user.content_tier.value, light=True,
                 )
                 gs.location_description = desc
             except Exception:
@@ -237,7 +237,7 @@ async def on_game_menu(cb: CallbackQuery, db: AsyncSession) -> None:
         )
         try:
             text = await generate_narrative(
-                prompt, content_tier=user.content_tier.value, system_instruction=sys_instr,
+                prompt, content_tier=user.content_tier.value, system_instruction=sys_instr, light=True,
             )
             text = md_to_html(text)
             await cb.message.answer(truncate_for_telegram(f"🔎 {text}", 3800), parse_mode="HTML")
@@ -262,7 +262,7 @@ async def on_game_menu(cb: CallbackQuery, db: AsyncSession) -> None:
         )
         try:
             text = await generate_narrative(
-                prompt, content_tier=user.content_tier.value, system_instruction=sys_instr,
+                prompt, content_tier=user.content_tier.value, system_instruction=sys_instr, light=True,
             )
             text = md_to_html(text)
             await cb.message.answer(truncate_for_telegram(f"❓ {text}", 3800), parse_mode="HTML")
@@ -375,7 +375,7 @@ async def _handle_meta_question(message: Message, user, db: AsyncSession) -> Non
     )
     try:
         text = await generate_narrative(
-            prompt, content_tier=user.content_tier.value, system_instruction=sys_instr,
+            prompt, content_tier=user.content_tier.value, system_instruction=sys_instr, light=True,
         )
         text = md_to_html(text)
         label = "ГМ" if user.language == "ru" else "GM"

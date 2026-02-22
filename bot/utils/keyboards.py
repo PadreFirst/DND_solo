@@ -216,8 +216,11 @@ def _strip_html(text: str) -> str:
 
 def _clean_action(text: str) -> str:
     """Strip HTML, trim to fit Telegram button. Validates completeness."""
+    import re
     clean = _strip_html(text)
     clean = clean.strip("«»\"'")
+    # strip parenthetical notes like "(нет в инвентаре)", "(if you have one)"
+    clean = re.sub(r"\s*\([^)]*\)?\s*$", "", clean).strip()
 
     # reject bare verbs (single word with no object/target)
     if " " not in clean.strip():
