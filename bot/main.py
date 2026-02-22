@@ -26,9 +26,10 @@ def setup_logging() -> None:
         stream=sys.stdout,
     )
     logging.getLogger("aiogram").setLevel(logging.WARNING)
-    logging.getLogger("sqlalchemy.engine").setLevel(
-        logging.INFO if settings.debug else logging.WARNING
-    )
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    logging.getLogger("aiosqlite").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.INFO)
 
 
 async def set_bot_commands(bot: Bot) -> None:

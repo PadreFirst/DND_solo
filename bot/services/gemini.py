@@ -519,7 +519,8 @@ async def generate_structured(
             try:
                 raw = json.loads(text)
             except json.JSONDecodeError:
-                log.warning("JSON parse failed, attempting repair (attempt %d)", attempt + 1)
+                log.warning("JSON parse failed (attempt %d), raw response (first 500 chars): %s",
+                            attempt + 1, text[:500])
                 repaired = _repair_json(text)
                 try:
                     raw = json.loads(repaired)
