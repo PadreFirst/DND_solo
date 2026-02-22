@@ -169,6 +169,18 @@ async def on_game_menu(cb: CallbackQuery, db: AsyncSession) -> None:
         await cb.answer()
         return
 
+    if action == "locinfo":
+        gs = await ensure_session(user, db)
+        desc = gs.location_description
+        loc = gs.current_location
+        if desc:
+            text = f"📍 <b>{loc}</b>\n\n{md_to_html(desc)}"
+        else:
+            text = f"📍 <b>{loc}</b>" if loc else ("📍 Локация неизвестна" if user.language == "ru" else "📍 Location unknown")
+        await cb.message.answer(truncate_for_telegram(text, 3800), parse_mode="HTML")
+        await cb.answer()
+        return
+
     if action == "rest":
         await cb.message.edit_reply_markup(reply_markup=rest_keyboard(user.language))
         await cb.answer()
@@ -686,6 +698,8 @@ async def _process_player_action(
 
     if decision.location_change:
         gs.current_location = decision.location_change
+        if decision.location_description:
+            gs.location_description = decision.location_description
     if decision.quest_update:
         gs.current_quest = decision.quest_update
     if decision.is_combat_start:
@@ -723,6 +737,10 @@ async def _process_player_action(
     if mechanics_lines:
         parts.append(f"<blockquote>{chr(10).join(mechanics_lines)}</blockquote>")
     parts.append(narrative)
+
+    if decision.location_change and decision.location_description:
+        loc_text = md_to_html(decision.location_description)
+        parts.append(f"📍 <b>{decision.location_change}</b>\n<i>{loc_text}</i>")
 
     if decision.has_dialogue:
         hint = ("💬 <i>Напиши, что скажешь или сделаешь</i>"

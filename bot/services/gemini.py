@@ -164,6 +164,7 @@ class GameResponse(BaseModel):
     xp_gained: int = 0
     gold_change: int = 0
     location_change: str = ""
+    location_description: str = Field(default="", description="If location_change is set: 2-3 sentences describing the new place — size, exits, key objects, lighting, atmosphere. SEPARATE from narrative.")
     quest_update: str = ""
     attack_target_hp: int = Field(default=0, description="Current HP of attack target (if attacking)")
     attack_target_max_hp: int = Field(default=0, description="Max HP of attack target (if attacking)")

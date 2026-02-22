@@ -20,6 +20,7 @@ class GameSession(Base):
     theme: Mapped[str] = mapped_column(String(100), default="classic")
 
     current_location: Mapped[str] = mapped_column(String(255), default="Unknown")
+    location_description: Mapped[str] = mapped_column(Text, default="")
     current_quest: Mapped[str] = mapped_column(Text, default="")
     world_state: Mapped[str] = mapped_column(Text, default="{}")
 

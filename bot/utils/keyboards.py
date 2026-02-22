@@ -203,9 +203,11 @@ def actions_keyboard(
             rows.append([InlineKeyboardButton(**btn_kwargs)])
 
     menu_label = "📋 Меню" if lang == "ru" else "📋 Menu"
+    loc_label = "📍" 
     gm_label = "❓ ГМ" if lang == "ru" else "❓ GM"
     rows.append([
         InlineKeyboardButton(text=menu_label, callback_data="gamemenu:open", style="primary"),
+        InlineKeyboardButton(text=loc_label, callback_data="gamemenu:locinfo"),
         InlineKeyboardButton(text=gm_label, callback_data="gamemenu:askgm", style="success"),
     ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
