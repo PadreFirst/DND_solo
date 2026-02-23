@@ -46,7 +46,10 @@ async def _show_categories(cb: CallbackQuery, db: AsyncSession) -> None:
     cur = gs.currency_name or ""
     text = format_inventory(char, user.language, cur)
     kb = inventory_categories_keyboard(char.inventory, user.language) if char.inventory else None
-    await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    try:
+        await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        pass
     await cb.answer()
 
 
@@ -68,8 +71,11 @@ async def on_inv_cat(cb: CallbackQuery, db: AsyncSession) -> None:
     user = await get_or_create_user(cb.from_user.id, cb.from_user.username, db)
     char = await ensure_character(user, db)
     header = cat_label(cat, user.language)
-    kb = inventory_cat_items_keyboard(char.inventory, cat, user.language, page)
-    await cb.message.edit_text(header, parse_mode="HTML", reply_markup=kb)
+    kb = inventory_cat_items_keyboard(char.inventory or [], cat, user.language, page)
+    try:
+        await cb.message.edit_text(header, parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        pass
     await cb.answer()
 
 

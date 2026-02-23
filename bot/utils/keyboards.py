@@ -318,6 +318,16 @@ def cat_label(cat: str, lang: str) -> str:
 
 
 def inventory_categories_keyboard(items: list[dict], lang: str = "en") -> InlineKeyboardMarkup:
+    if len(items) <= 5:
+        rows: list[list[InlineKeyboardButton]] = []
+        for i, item in enumerate(items):
+            name = item.get("name", "???")
+            qty = item.get("quantity", 1)
+            eq = "✅ " if item.get("equipped") else ""
+            label = f"{eq}{name} ×{qty}" if qty > 1 else f"{eq}{name}"
+            rows.append([InlineKeyboardButton(text=label, callback_data=f"inv:select:{i}")])
+        return InlineKeyboardMarkup(inline_keyboard=rows)
+
     groups = _group_items(items)
     rows: list[list[InlineKeyboardButton]] = []
     for k in ITEM_CAT_TYPES:
@@ -436,8 +446,8 @@ def actions_keyboard(
 
     if combat_data:
         rows.extend(_combat_quick_rows(
-            combat_data.get("inventory", []),
-            combat_data.get("abilities", []),
+            combat_data.get("inventory") or [],
+            combat_data.get("abilities") or [],
             lang,
         ))
 
@@ -549,16 +559,6 @@ def inventory_item_keyboard(item_index: int, lang: str = "en") -> InlineKeyboard
         [InlineKeyboardButton(text="🗑 Drop", callback_data=f"inv:drop:{item_index}", style="danger")],
         [InlineKeyboardButton(text="⬅️ Back", callback_data="inv:cats", style="primary")],
     ])
-
-
-def inventory_list_keyboard(items: list[dict]) -> InlineKeyboardMarkup:
-    buttons = []
-    for i, item in enumerate(items[:10]):
-        name = item.get("name", "???")
-        qty = item.get("quantity", 1)
-        label = f"{name} x{qty}" if qty > 1 else name
-        buttons.append([InlineKeyboardButton(text=label, callback_data=f"inv:select:{i}")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def abilities_list_keyboard(abilities: list[dict], lang: str = "en") -> InlineKeyboardMarkup:

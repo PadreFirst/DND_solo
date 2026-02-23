@@ -47,6 +47,13 @@ async def set_bot_commands(bot: Bot) -> None:
     await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
 
 
+_shutdown_event = asyncio.Event()
+
+
+def _handle_signal() -> None:
+    _shutdown_event.set()
+
+
 async def _run_web_server() -> None:
     log = logging.getLogger(__name__)
     app = create_app()
@@ -56,7 +63,7 @@ async def _run_web_server() -> None:
     await site.start()
     log.info("Web server started on 0.0.0.0:%d", settings.webapp_port)
     try:
-        await asyncio.Event().wait()
+        await _shutdown_event.wait()
     finally:
         await runner.cleanup()
 
@@ -83,6 +90,14 @@ async def main() -> None:
     dp.include_router(start_router)
     dp.include_router(inventory_router)
     dp.include_router(game_router)
+
+    import signal
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, _handle_signal)
+        except NotImplementedError:
+            pass
 
     log.info("Bot starting in polling mode + web server on port %d...", settings.webapp_port)
     await asyncio.gather(

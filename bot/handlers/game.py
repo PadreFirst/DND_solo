@@ -115,7 +115,7 @@ async def on_game_menu(cb: CallbackQuery, db: AsyncSession) -> None:
         combat_data = None
         if gs.in_combat:
             char = await ensure_character(user, db)
-            combat_data = {"inventory": char.inventory, "abilities": char.abilities}
+            combat_data = {"inventory": char.inventory or [], "abilities": char.abilities or []}
         await cb.message.edit_reply_markup(
             reply_markup=actions_keyboard(saved_actions, user.language,
                                           styles=saved_styles, combat_data=combat_data)
@@ -349,21 +349,21 @@ async def on_combat_button(cb: CallbackQuery, db: AsyncSession) -> None:
     lang = user.language
 
     if btn_type == "w":
-        inv = char.inventory
+        inv = char.inventory or []
         if idx >= len(inv):
             await cb.answer("Not found", show_alert=True)
             return
         name = inv[idx].get("name", "???")
         action_text = f"Атакую {name}" if lang == "ru" else f"I attack with {name}"
     elif btn_type == "p":
-        inv = char.inventory
+        inv = char.inventory or []
         if idx >= len(inv):
             await cb.answer("Not found", show_alert=True)
             return
         name = inv[idx].get("name", "???")
         action_text = f"Использую {name}" if lang == "ru" else f"I use {name}"
     elif btn_type == "a":
-        abilities = char.abilities
+        abilities = char.abilities or []
         if idx >= len(abilities):
             await cb.answer("Not found", show_alert=True)
             return
@@ -875,7 +875,7 @@ async def _process_player_action(
 
     combat_data = None
     if gs.in_combat:
-        combat_data = {"inventory": char.inventory, "abilities": char.abilities}
+        combat_data = {"inventory": char.inventory or [], "abilities": char.abilities or []}
 
     full_text = truncate_for_telegram("\n\n".join(parts))
     kb = actions_keyboard(final_actions, lang, styles=final_styles, combat_data=combat_data)
