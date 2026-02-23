@@ -35,7 +35,7 @@ from bot.utils.keyboards import (
     ability_detail_keyboard,
     actions_keyboard,
     game_menu_keyboard,
-    inventory_list_keyboard,
+    inventory_categories_keyboard,
     rest_keyboard,
 )
 
@@ -112,8 +112,13 @@ async def on_game_menu(cb: CallbackQuery, db: AsyncSession) -> None:
         gs = await ensure_session(user, db)
         saved_actions = gs.last_actions or None
         saved_styles = gs.last_action_styles or None
+        combat_data = None
+        if gs.in_combat:
+            char = await ensure_character(user, db)
+            combat_data = {"inventory": char.inventory, "abilities": char.abilities}
         await cb.message.edit_reply_markup(
-            reply_markup=actions_keyboard(saved_actions, user.language, styles=saved_styles)
+            reply_markup=actions_keyboard(saved_actions, user.language,
+                                          styles=saved_styles, combat_data=combat_data)
         )
         await cb.answer()
         return
@@ -131,7 +136,7 @@ async def on_game_menu(cb: CallbackQuery, db: AsyncSession) -> None:
         gs = await ensure_session(user, db)
         cur = gs.currency_name or ""
         text = format_inventory(char, user.language, cur)
-        kb = inventory_list_keyboard(char.inventory) if char.inventory else None
+        kb = inventory_categories_keyboard(char.inventory, user.language) if char.inventory else None
         await cb.message.answer(text, parse_mode="HTML", reply_markup=kb)
         await cb.answer()
         return
@@ -326,6 +331,48 @@ async def on_ability_back(cb: CallbackQuery, db: AsyncSession) -> None:
 @router.callback_query(F.data.startswith("act:"))
 async def on_action_button(cb: CallbackQuery, db: AsyncSession) -> None:
     action_text = cb.data[4:]
+    await cb.answer()
+    await _typing(cb)
+    await _process_player_action(cb.message, cb.from_user.id, cb.from_user.username, action_text, db)
+
+
+# ---- #10: Combat quick buttons ----
+
+@router.callback_query(F.data.startswith("cbt:"))
+async def on_combat_button(cb: CallbackQuery, db: AsyncSession) -> None:
+    parts = cb.data.split(":")
+    btn_type = parts[1]
+    idx = int(parts[2])
+
+    user = await get_or_create_user(cb.from_user.id, cb.from_user.username, db)
+    char = await ensure_character(user, db)
+    lang = user.language
+
+    if btn_type == "w":
+        inv = char.inventory
+        if idx >= len(inv):
+            await cb.answer("Not found", show_alert=True)
+            return
+        name = inv[idx].get("name", "???")
+        action_text = f"Атакую {name}" if lang == "ru" else f"I attack with {name}"
+    elif btn_type == "p":
+        inv = char.inventory
+        if idx >= len(inv):
+            await cb.answer("Not found", show_alert=True)
+            return
+        name = inv[idx].get("name", "???")
+        action_text = f"Использую {name}" if lang == "ru" else f"I use {name}"
+    elif btn_type == "a":
+        abilities = char.abilities
+        if idx >= len(abilities):
+            await cb.answer("Not found", show_alert=True)
+            return
+        name = abilities[idx].get("name", "???")
+        action_text = f"Использую способность {name}" if lang == "ru" else f"I use ability {name}"
+    else:
+        await cb.answer()
+        return
+
     await cb.answer()
     await _typing(cb)
     await _process_player_action(cb.message, cb.from_user.id, cb.from_user.username, action_text, db)
@@ -826,8 +873,12 @@ async def _process_player_action(
     gs.last_actions = final_actions or []
     gs.last_action_styles = final_styles or []
 
+    combat_data = None
+    if gs.in_combat:
+        combat_data = {"inventory": char.inventory, "abilities": char.abilities}
+
     full_text = truncate_for_telegram("\n\n".join(parts))
-    kb = actions_keyboard(final_actions, lang, styles=final_styles)
+    kb = actions_keyboard(final_actions, lang, styles=final_styles, combat_data=combat_data)
 
     sent = False
     if progress_msg:

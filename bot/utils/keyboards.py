@@ -278,10 +278,143 @@ _STYLE_MAP = {
 }
 
 
+# --- #9: Inventory categories ---
+
+ITEM_CAT_TYPES: dict[str, tuple[str, ...] | None] = {
+    "w": ("weapon",),
+    "a": ("armor", "shield"),
+    "p": ("potion", "consumable"),
+    "o": None,
+}
+
+_CAT_META = {
+    "w": {"emoji": "⚔️", "ru": "Оружие", "en": "Weapons"},
+    "a": {"emoji": "🛡", "ru": "Броня", "en": "Armor"},
+    "p": {"emoji": "🧪", "ru": "Зелья", "en": "Potions"},
+    "o": {"emoji": "📦", "ru": "Прочее", "en": "Other"},
+}
+
+_INV_PAGE = 8
+
+
+def item_category(item: dict) -> str:
+    itype = (item.get("type") or "misc").lower()
+    for k, types in ITEM_CAT_TYPES.items():
+        if types and itype in types:
+            return k
+    return "o"
+
+
+def _group_items(items: list[dict]) -> dict[str, list[tuple[int, dict]]]:
+    groups: dict[str, list[tuple[int, dict]]] = {k: [] for k in ITEM_CAT_TYPES}
+    for i, item in enumerate(items):
+        groups[item_category(item)].append((i, item))
+    return groups
+
+
+def cat_label(cat: str, lang: str) -> str:
+    m = _CAT_META.get(cat, _CAT_META["o"])
+    return f"{m['emoji']} {m.get(lang, m['en'])}"
+
+
+def inventory_categories_keyboard(items: list[dict], lang: str = "en") -> InlineKeyboardMarkup:
+    groups = _group_items(items)
+    rows: list[list[InlineKeyboardButton]] = []
+    for k in ITEM_CAT_TYPES:
+        g = groups[k]
+        if not g:
+            continue
+        label = f"{cat_label(k, lang)} ({len(g)})"
+        rows.append([InlineKeyboardButton(text=label, callback_data=f"inv:cat:{k}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def inventory_cat_items_keyboard(
+    items: list[dict], cat: str, lang: str = "en", page: int = 0,
+) -> InlineKeyboardMarkup:
+    groups = _group_items(items)
+    cat_items = groups.get(cat, [])
+    total = len(cat_items)
+    start = page * _INV_PAGE
+    page_items = cat_items[start : start + _INV_PAGE]
+
+    rows: list[list[InlineKeyboardButton]] = []
+    for idx, item in page_items:
+        name = item.get("name", "???")
+        qty = item.get("quantity", 1)
+        eq = "✅ " if item.get("equipped") else ""
+        label = f"{eq}{name} ×{qty}" if qty > 1 else f"{eq}{name}"
+        rows.append([InlineKeyboardButton(text=label, callback_data=f"inv:select:{idx}")])
+
+    nav: list[InlineKeyboardButton] = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"inv:cat:{cat}:{page - 1}"))
+    if start + _INV_PAGE < total:
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"inv:cat:{cat}:{page + 1}"))
+    if nav:
+        rows.append(nav)
+
+    back = "⬅️ Категории" if lang == "ru" else "⬅️ Categories"
+    rows.append([InlineKeyboardButton(text=back, callback_data="inv:cats")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# --- #10: Combat quick buttons ---
+
+def _combat_quick_rows(
+    inventory: list[dict], abilities: list[dict], lang: str,
+) -> list[list[InlineKeyboardButton]]:
+    rows: list[list[InlineKeyboardButton]] = []
+
+    weapons: list[InlineKeyboardButton] = []
+    for i, item in enumerate(inventory):
+        if item.get("type", "").lower() == "weapon" and item.get("equipped"):
+            label = f"⚔️ {item.get('name', '???')}"[:28]
+            weapons.append(InlineKeyboardButton(
+                text=label, callback_data=_trim_callback("cbt:w:", str(i)), style="danger",
+            ))
+            if len(weapons) >= 2:
+                break
+    if weapons:
+        rows.append(weapons)
+
+    potions: list[InlineKeyboardButton] = []
+    for i, item in enumerate(inventory):
+        if (item.get("type") or "").lower() in ("potion", "consumable"):
+            name = item.get("name", "???")
+            qty = item.get("quantity", 1)
+            label = f"🧪 {name}"
+            if qty > 1:
+                label += f" ×{qty}"
+            label = label[:28]
+            potions.append(InlineKeyboardButton(
+                text=label, callback_data=_trim_callback("cbt:p:", str(i)), style="success",
+            ))
+            if len(potions) >= 2:
+                break
+    if potions:
+        rows.append(potions)
+
+    active_abs: list[InlineKeyboardButton] = []
+    for i, ab in enumerate(abilities):
+        if ab.get("type", "").lower() == "active":
+            label = f"✨ {ab.get('name', '???')}"[:28]
+            active_abs.append(InlineKeyboardButton(
+                text=label, callback_data=_trim_callback("cbt:a:", str(i)), style="primary",
+            ))
+            if len(active_abs) >= 2:
+                break
+    if active_abs:
+        rows.append(active_abs)
+
+    return rows
+
+
 def actions_keyboard(
     actions: list[str] | None = None,
     lang: str = "en",
     styles: list[str] | None = None,
+    combat_data: dict | None = None,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
 
@@ -301,8 +434,15 @@ def actions_keyboard(
                 btn_kwargs["style"] = style_val
             rows.append([InlineKeyboardButton(**btn_kwargs)])
 
+    if combat_data:
+        rows.extend(_combat_quick_rows(
+            combat_data.get("inventory", []),
+            combat_data.get("abilities", []),
+            lang,
+        ))
+
     menu_label = "📋 Меню" if lang == "ru" else "📋 Menu"
-    loc_label = "📍" 
+    loc_label = "📍"
     gm_label = "❓ ГМ" if lang == "ru" else "❓ GM"
     rows.append([
         InlineKeyboardButton(text=menu_label, callback_data="gamemenu:open", style="primary"),
@@ -396,16 +536,18 @@ def inventory_item_keyboard(item_index: int, lang: str = "en") -> InlineKeyboard
         return InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(text="🔧 Использовать", callback_data=f"inv:use:{item_index}", style="success"),
-                InlineKeyboardButton(text="🗑 Выбросить", callback_data=f"inv:drop:{item_index}", style="danger"),
+                InlineKeyboardButton(text="🔍 Осмотреть", callback_data=f"inv:inspect:{item_index}", style="primary"),
             ],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="inv:back", style="primary")],
+            [InlineKeyboardButton(text="🗑 Выбросить", callback_data=f"inv:drop:{item_index}", style="danger")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="inv:cats", style="primary")],
         ])
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="🔧 Use", callback_data=f"inv:use:{item_index}", style="success"),
-            InlineKeyboardButton(text="🗑 Drop", callback_data=f"inv:drop:{item_index}", style="danger"),
+            InlineKeyboardButton(text="🔍 Inspect", callback_data=f"inv:inspect:{item_index}", style="primary"),
         ],
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="inv:back", style="primary")],
+        [InlineKeyboardButton(text="🗑 Drop", callback_data=f"inv:drop:{item_index}", style="danger")],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="inv:cats", style="primary")],
     ])
 
 
