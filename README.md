@@ -49,7 +49,7 @@ cd DND_solo
 ```
 BOT_TOKEN=your_telegram_bot_token
 GEMINI_API_KEY=your_gemini_api_key
-GEMINI_MODEL=gemini-2.0-flash
+GEMINI_MODEL=gemini-3-flash-preview
 GEMINI_MODEL_HEAVY=gemini-3-pro-preview
 GEMINI_PROXY=
 DATABASE_URL=sqlite+aiosqlite:///./dnd_bot.db
@@ -61,7 +61,7 @@ DEBUG=true
 |---|---|
 | `BOT_TOKEN` | Токен Telegram-бота от @BotFather |
 | `GEMINI_API_KEY` | API-ключ Google AI Studio |
-| `GEMINI_MODEL` | Модель для геймплея (default: `gemini-2.0-flash`) |
+| `GEMINI_MODEL` | Модель для геймплея (default: `gemini-3-flash-preview`) |
 | `GEMINI_MODEL_HEAVY` | Модель для генерации мира/персонажа (default: пустая → используется `GEMINI_MODEL`) |
 | `GEMINI_MODEL_LIGHT` | Модель для вспомогательных задач (локация, осмотр, ГМ-ответы) |
 | `GEMINI_PROXY` | Cloudflare Worker или HTTP-прокси для Gemini API (если geo-blocked) |

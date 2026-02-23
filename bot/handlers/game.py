@@ -774,12 +774,33 @@ async def _process_player_action(
     for npc in decision.npc_actions:
         if npc.damage_dice:
             try:
-                dmg = engine.roll(npc.damage_dice, reason=f"{npc.name}")
-                hp_line = engine.apply_damage_verbose(char, dmg.total, lang)
-                mechanics_lines.append(f"{npc.name}: {dmg.display}")
-                mechanics_lines.append(hp_line)
+                atk_bonus = npc.attack_bonus if hasattr(npc, 'attack_bonus') else 3
+                npc_atk = engine.roll("1d20", modifier=atk_bonus, reason=f"{npc.name}")
+                player_ac = char.ac
+                npc_hit = npc_atk.natural_20 or npc_atk.total >= player_ac
+                if npc_hit:
+                    dice = npc.damage_dice
+                    if npc_atk.natural_20:
+                        parts_d = dice.split("d")
+                        cnt = int(parts_d[0]) * 2
+                        dice = f"{cnt}d{parts_d[1]}"
+                    dmg = engine.roll(dice, reason=f"{npc.name}")
+                    hp_line = engine.apply_damage_verbose(char, dmg.total, lang)
+                    hit_lbl = "Крит!" if npc_atk.natural_20 else "Попадание!"
+                    if lang != "ru":
+                        hit_lbl = "Crit!" if npc_atk.natural_20 else "Hit!"
+                    mechanics_lines.append(
+                        f"{npc.name}: {npc_atk.display} vs AC {player_ac} ✅ {hit_lbl}"
+                    )
+                    mechanics_lines.append(f"{npc.name}: {dmg.display}")
+                    mechanics_lines.append(hp_line)
+                else:
+                    miss_lbl = "Промах!" if lang == "ru" else "Miss!"
+                    mechanics_lines.append(
+                        f"{npc.name}: {npc_atk.display} vs AC {player_ac} ❌ {miss_lbl}"
+                    )
             except Exception:
-                log.warning("NPC damage failed: %s", npc.damage_dice)
+                log.warning("NPC attack failed: %s", npc.damage_dice)
 
     for sc in decision.stat_changes:
         if sc.stat == "current_hp" and sc.delta < 0:

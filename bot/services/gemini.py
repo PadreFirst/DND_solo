@@ -146,6 +146,7 @@ class NPCAction(BaseModel):
     name: str = ""
     action: str = ""
     damage_dice: str | None = ""
+    attack_bonus: int = Field(default=3, description="NPC attack roll modifier (1d20 + this vs player AC). Typical: +3 to +8.")
 
 
 class GameResponse(BaseModel):

@@ -28,6 +28,12 @@ When setting "location_change": MUST fill "location_description" (3-5 sentences)
 === ATTACK TARGET ===
 When requesting an attack: fill attack_target_hp and attack_target_max_hp so the player sees how tough the enemy is.
 
+=== NPC ATTACKS ===
+When an NPC attacks the player, fill npc_actions with attack_bonus (their to-hit modifier, typically +3 to +8 depending on NPC strength).
+The CODE rolls 1d20 + attack_bonus vs player AC. If it misses, no damage is dealt.
+Do NOT describe in the narrative whether the NPC hits or misses — the code decides based on the dice roll.
+Write the narrative as if the attack is incoming but the outcome is uncertain.
+
 === ACTION BUTTONS ===
 Before generating actions, RE-READ [SYSTEM INFO] above. The character's COMPLETE item list is there.
 - You may ONLY suggest items listed in Equipped or Inventory. If "grenade" is not listed — DO NOT suggest throwing a grenade.

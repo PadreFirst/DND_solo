@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./dnd_bot.db"
     debug: bool = False
 
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-3-flash-preview"
     gemini_model_heavy: str = ""
     gemini_model_light: str = ""
     gemini_proxy: str = ""
