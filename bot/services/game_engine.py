@@ -683,15 +683,23 @@ class DeathSaveResult:
     success: bool
     stabilized: bool
     dead: bool
+    total_successes: int = 0
+    total_failures: int = 0
 
-    @property
-    def display(self) -> str:
+    def display_localized(self, lang: str = "en") -> str:
+        ru = lang == "ru"
+        label = "Спасбросок от смерти" if ru else "Death save"
         if self.stabilized:
-            return f"🎲 Death save: {self.roll_result.display}\n💚 Stabilized!"
+            tag = "💚 Стабилизирован!" if ru else "💚 Stabilized!"
+            return f"🎲 {label}: {self.roll_result.display}\n{tag}"
         if self.dead:
-            return f"🎲 Death save: {self.roll_result.display}\n💀 Dead..."
+            tag = "💀 Мёртв..." if ru else "💀 Dead..."
+            return f"🎲 {label}: {self.roll_result.display}\n{tag}"
         tag = "✅" if self.success else "❌"
-        return f"🎲 Death save: {self.roll_result.display} {tag}"
+        s = "✅" * self.total_successes + "⬜" * (3 - self.total_successes)
+        f_ = "❌" * self.total_failures + "⬜" * (3 - self.total_failures)
+        counter = f"  [{s} | {f_}]"
+        return f"🎲 {label}: {self.roll_result.display} {tag}{counter}"
 
 
 def make_attack(
@@ -795,7 +803,8 @@ def death_saving_throw(char: Character) -> DeathSaveResult:
         char.death_save_successes = 0
         char.death_save_failures = 0
         return DeathSaveResult(
-            roll_result=result, success=True, stabilized=True, dead=False
+            roll_result=result, success=True, stabilized=True, dead=False,
+            total_successes=3, total_failures=0,
         )
 
     success = result.total >= 10
@@ -809,16 +818,17 @@ def death_saving_throw(char: Character) -> DeathSaveResult:
     stabilized = char.death_save_successes >= 3
     dead = char.death_save_failures >= 3
 
-    if stabilized:
-        char.death_save_successes = 0
-        char.death_save_failures = 0
-    if dead:
+    ds = DeathSaveResult(
+        roll_result=result, success=success, stabilized=stabilized, dead=dead,
+        total_successes=char.death_save_successes,
+        total_failures=char.death_save_failures,
+    )
+
+    if stabilized or dead:
         char.death_save_successes = 0
         char.death_save_failures = 0
 
-    return DeathSaveResult(
-        roll_result=result, success=success, stabilized=stabilized, dead=dead
-    )
+    return ds
 
 
 def apply_damage(char: Character, damage: int) -> str:

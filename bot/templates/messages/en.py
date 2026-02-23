@@ -69,7 +69,9 @@ GAME_START = (
 )
 
 LEVEL_UP = "🎉 <b>LEVEL UP!</b>\n\n{name} → Lv.{level}\nHP: {old_hp} → {new_hp}"
+DYING = "⚠️ <b>{name} falls unconscious!</b> (0 HP)\n\nYour character is unconscious. Each turn — a death saving throw."
 DEATH = "💀 <b>{name} has fallen...</b>\n\nDarkness envelops you...\n\n/start — new adventure"
+STABILIZED = "💚 <b>{name} stabilized!</b>\n\nYou're unconscious but no longer dying. You need help or rest."
 ERROR = "⚠️ Something went wrong. Try again or /start"
 MENU_HELP = (
     "📋 <b>Commands:</b>\n"

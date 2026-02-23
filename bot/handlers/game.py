@@ -10,7 +10,7 @@ import time
 from aiogram import F, Router
 from aiogram.enums import ChatAction
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models.user import OnboardingState
@@ -336,6 +336,26 @@ async def on_action_button(cb: CallbackQuery, db: AsyncSession) -> None:
     await _process_player_action(cb.message, cb.from_user.id, cb.from_user.username, action_text, db)
 
 
+# ---- Death save / restart callbacks ----
+
+@router.callback_query(F.data == "deathsave")
+async def on_death_save(cb: CallbackQuery, db: AsyncSession) -> None:
+    user = await get_or_create_user(cb.from_user.id, cb.from_user.username, db)
+    char = await ensure_character(user, db)
+    gs = await ensure_session(user, db)
+    if char.current_hp > 0:
+        await cb.answer()
+        return
+    await _handle_death_save(cb.message, user, char, gs, db)
+    await cb.answer()
+
+
+@router.callback_query(F.data == "restart")
+async def on_restart(cb: CallbackQuery, db: AsyncSession) -> None:
+    await cb.answer()
+    await cb.message.answer("/start — начни новое приключение")
+
+
 # ---- #10: Combat quick buttons ----
 
 @router.callback_query(F.data.startswith("cbt:"))
@@ -590,6 +610,48 @@ async def _keep_typing_with_progress(
                     pass
 
 
+# ---- Death saves ----
+
+def _death_save_keyboard(lang: str) -> InlineKeyboardMarkup:
+    label = "🎲 Бросок спасения от смерти" if lang == "ru" else "🎲 Death Saving Throw"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=label, callback_data="deathsave", style="danger")],
+    ])
+
+
+def _dead_keyboard(lang: str) -> InlineKeyboardMarkup:
+    label = "🔄 /start — новое приключение" if lang == "ru" else "🔄 /start — new adventure"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=label, callback_data="restart")],
+    ])
+
+
+async def _handle_death_save(
+    reply_target: Message, user, char, gs, db: AsyncSession,
+) -> None:
+    lang = user.language
+    ds = engine.death_saving_throw(char)
+    text = ds.display_localized(lang)
+
+    if ds.stabilized:
+        char.current_hp = 0
+        gs.in_combat = False
+        text += "\n\n" + t("STABILIZED", lang, name=char.name)
+        text += f"\n\n<code>{compact_stat_bar(char, lang, gs.currency_name)}</code>"
+        kb = actions_keyboard(
+            ["Осмотреться" if lang == "ru" else "Look around"],
+            lang,
+        )
+    elif ds.dead:
+        text += "\n\n" + t("DEATH", lang, name=char.name)
+        kb = _dead_keyboard(lang)
+    else:
+        text += f"\n\n<code>{compact_stat_bar(char, lang, gs.currency_name)}</code>"
+        kb = _death_save_keyboard(lang)
+
+    await reply_target.answer(text, parse_mode="HTML", reply_markup=kb)
+
+
 # ---- Core game loop (single-pass) ----
 
 async def _process_player_action(
@@ -601,6 +663,10 @@ async def _process_player_action(
         return
     char = await ensure_character(user, db)
     gs = await ensure_session(user, db)
+
+    if char.current_hp <= 0:
+        await _handle_death_save(reply_target, user, char, gs, db)
+        return
 
     start_time = time.monotonic()
     track_interaction(user, player_action)
@@ -846,7 +912,7 @@ async def _process_player_action(
         parts.append(t("LEVEL_UP", lang, name=char.name, level=str(char.level),
                         old_hp=str(old_hp), new_hp=str(char.max_hp)))
     if char.current_hp <= 0:
-        parts.append(t("DEATH", lang, name=char.name))
+        parts.append(t("DYING", lang, name=char.name))
 
     elapsed = int((time.monotonic() - start_time) * 1000)
     log.info("Turn %d user %d: %dms", gs.turn_number, user.telegram_id, elapsed)
@@ -873,12 +939,15 @@ async def _process_player_action(
     gs.last_actions = final_actions or []
     gs.last_action_styles = final_styles or []
 
-    combat_data = None
-    if gs.in_combat:
-        combat_data = {"inventory": char.inventory or [], "abilities": char.abilities or []}
+    if char.current_hp <= 0:
+        kb = _death_save_keyboard(lang)
+    else:
+        combat_data = None
+        if gs.in_combat:
+            combat_data = {"inventory": char.inventory or [], "abilities": char.abilities or []}
+        kb = actions_keyboard(final_actions, lang, styles=final_styles, combat_data=combat_data)
 
     full_text = truncate_for_telegram("\n\n".join(parts))
-    kb = actions_keyboard(final_actions, lang, styles=final_styles, combat_data=combat_data)
 
     sent = False
     if progress_msg:

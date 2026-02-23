@@ -1,5 +1,0 @@
-{
-  "name": "DND",
-  "description": "A text editor that persists data across application updates and reloads.",
-  "requestFramePermissions": []
-}
