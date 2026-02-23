@@ -391,12 +391,13 @@ def _combat_quick_rows(
 
     weapons: list[InlineKeyboardButton] = []
     for i, item in enumerate(inventory):
-        if item.get("type", "").lower() == "weapon" and item.get("equipped"):
-            label = f"⚔️ {item.get('name', '???')}"[:28]
+        if item.get("type", "").lower() == "weapon":
+            eq = "⚔️ " if item.get("equipped") else "🗡 "
+            label = f"{eq}{item.get('name', '???')}"[:28]
             weapons.append(InlineKeyboardButton(
                 text=label, callback_data=_trim_callback("cbt:w:", str(i)), style="danger",
             ))
-            if len(weapons) >= 2:
+            if len(weapons) >= 3:
                 break
     if weapons:
         rows.append(weapons)
