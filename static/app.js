@@ -27,6 +27,22 @@
     misc: "📦",
   };
 
+  const CLASS_NAMES_RU = {
+    barbarian: "Варвар",
+    bard: "Бард",
+    cleric: "Жрец",
+    druid: "Друид",
+    fighter: "Воин",
+    monk: "Монах",
+    paladin: "Паладин",
+    ranger: "Следопыт",
+    rogue: "Плут",
+    sorcerer: "Чародей",
+    warlock: "Колдун",
+    wizard: "Волшебник",
+    artificer: "Изобретатель",
+  };
+
   const RECHARGE_RU = {
     "at will": "без ограничений",
     "short rest": "короткий отдых",
@@ -71,9 +87,9 @@
       inventory: "Инвентарь",
       quest: "📜 Задание",
       location: "📍 Локация",
-      ac: "КЗ",
-      speed: "Скор.",
-      prof: "Маст.",
+      ac: "КЛ. ЗАЩ.",
+      speed: "СКОР.",
+      prof: "МАСТ.",
       gold: "Золото",
       all: "Все",
       equipped: "Надето",
@@ -85,7 +101,7 @@
       noQuest: "Нет активного задания",
       noLoc: "Неизвестно",
       inCombat: "В бою",
-      exploring: "Исследование",
+      exploring: "Вне боя",
       active: "Активная",
       passive: "Пассивная",
       loading: "Загрузка персонажа...",
@@ -181,7 +197,11 @@
 
   function renderHeader(d) {
     $("char-name").textContent = d.name;
-    $("char-subtitle").textContent = d.race + " · " + d.class;
+    let cls = d.class || "";
+    if (lang === "ru") {
+      cls = CLASS_NAMES_RU[cls.toLowerCase()] || cls;
+    }
+    $("char-subtitle").textContent = d.race + " · " + cls;
     $("level-badge").textContent = "Lv. " + d.level;
   }
 

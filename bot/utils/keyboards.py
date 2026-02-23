@@ -218,6 +218,17 @@ def _strip_html(text: str) -> str:
 
 _DISCLAIMER_PATTERNS = ("если есть", "if you have", "нет в", "нет у", "если ", "if ", "maybe", "возможно")
 
+_TRAILING_JUNK = frozenset({
+    "и", "или", "а", "но", "чтобы", "для", "на", "в", "к", "с", "из", "от",
+    "до", "за", "при", "по", "о", "об", "что", "как", "где", "когда", "если",
+    "то", "не", "ни", "бы", "же", "ли", "через", "около", "после", "перед",
+    "между", "под", "над", "у", "без", "ко", "со", "во",
+    "and", "or", "but", "to", "the", "a", "an", "with", "for", "in", "on",
+    "at", "by", "from", "of", "into", "then", "so", "if", "as",
+})
+
+_MAX_ACTION_LEN = 42
+
 
 def _clean_action(text: str) -> str:
     """Strip HTML, trim to fit Telegram button. Validates completeness."""
@@ -225,7 +236,6 @@ def _clean_action(text: str) -> str:
     clean = _strip_html(text)
     clean = clean.strip("«»\"'")
 
-    # check parenthetical content: disclaimer → reject, ability name → strip parens and keep
     paren_match = re.search(r"\(([^)]*)\)?", clean)
     if paren_match:
         inside = paren_match.group(1).lower()
@@ -233,27 +243,30 @@ def _clean_action(text: str) -> str:
             return ""
         clean = re.sub(r"\s*\([^)]*\)?\s*", " ", clean).strip()
 
-    # reject bare verbs (single word with no object/target)
     if " " not in clean.strip():
         return ""
 
-    if len(clean) <= 32:
+    if len(clean) <= _MAX_ACTION_LEN:
         result = clean
     else:
-        cut = clean[:32]
+        cut = clean[:_MAX_ACTION_LEN]
         last_space = cut.rfind(" ")
         if last_space > 10:
             cut = cut[:last_space]
         result = cut
 
-    # drop trailing adjective-like words (Russian: -ый, -ий, -ой, -ая, -ые, -ое, -ую, -ей)
+    result = result.rstrip(",;:—–-…· ")
+
     words = result.split()
+    while len(words) > 2 and words[-1].lower().rstrip(",;") in _TRAILING_JUNK:
+        words.pop()
+    result = " ".join(words)
+
     if len(words) > 2:
         last = words[-1].lower()
         if any(last.endswith(s) for s in ("ый", "ий", "ой", "ая", "ые", "ое", "ую", "ей", "ых", "их")):
             result = " ".join(words[:-1])
 
-    # after trimming, if only one word remains — it's incomplete
     if " " not in result.strip():
         return ""
 
