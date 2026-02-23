@@ -50,10 +50,6 @@ async def set_bot_commands(bot: Bot) -> None:
 _shutdown_event = asyncio.Event()
 
 
-def _handle_signal() -> None:
-    _shutdown_event.set()
-
-
 async def _run_web_server() -> None:
     log = logging.getLogger(__name__)
     app = create_app()
@@ -91,19 +87,17 @@ async def main() -> None:
     dp.include_router(inventory_router)
     dp.include_router(game_router)
 
-    import signal
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        try:
-            loop.add_signal_handler(sig, _handle_signal)
-        except NotImplementedError:
-            pass
-
     log.info("Bot starting in polling mode + web server on port %d...", settings.webapp_port)
-    await asyncio.gather(
-        dp.start_polling(bot),
-        _run_web_server(),
-    )
+    web_task = asyncio.create_task(_run_web_server())
+    try:
+        await dp.start_polling(bot)
+    finally:
+        _shutdown_event.set()
+        web_task.cancel()
+        try:
+            await web_task
+        except asyncio.CancelledError:
+            pass
 
 
 if __name__ == "__main__":
