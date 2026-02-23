@@ -10,6 +10,56 @@ from dataclasses import dataclass
 from bot.models.character import Character
 from bot.utils.dice import RollResult, roll
 
+# --- Condition effects (D&D 5e) ---
+CONDITION_EFFECTS: dict[str, dict] = {
+    "poisoned": {"attack_disadvantage": True, "ability_check_disadvantage": True},
+    "frightened": {"attack_disadvantage": True, "ability_check_disadvantage": True},
+    "prone": {"attack_disadvantage": True, "melee_advantage_against": True},
+    "blinded": {"attack_disadvantage": True, "advantage_against": True},
+    "restrained": {"attack_disadvantage": True, "dex_save_disadvantage": True, "advantage_against": True},
+    "stunned": {"auto_fail_str_dex_saves": True, "advantage_against": True},
+    "paralyzed": {"auto_fail_str_dex_saves": True, "advantage_against": True},
+    "incapacitated": {"no_actions": True},
+    "charmed": {"ability_check_advantage_by_source": True},
+    "grappled": {"speed_zero": True},
+}
+
+_CONDITION_NAMES_RU = {
+    "poisoned": "отравлен", "frightened": "напуган", "prone": "сбит с ног",
+    "blinded": "ослеплён", "restrained": "обездвижен", "stunned": "оглушён",
+    "paralyzed": "парализован", "incapacitated": "недееспособен",
+    "charmed": "очарован", "grappled": "захвачен",
+}
+
+
+def get_condition_flags(char: Character) -> dict:
+    """Aggregate all active condition effects into a single flags dict."""
+    flags: dict = {}
+    for cond in (char.conditions or []):
+        cond_lower = cond.lower()
+        for key, effects in CONDITION_EFFECTS.items():
+            if key in cond_lower:
+                flags.update(effects)
+                break
+    return flags
+
+
+def format_conditions(conditions: list[str], lang: str = "en") -> str:
+    if not conditions:
+        return ""
+    if lang == "ru":
+        names = [_CONDITION_NAMES_RU.get(c.lower(), c) for c in conditions]
+        return "⚠️ " + ", ".join(names)
+    return "⚠️ " + ", ".join(conditions)
+
+
+def concentration_save(char: Character, damage: int, lang: str = "en"):
+    """Roll CON save to maintain concentration. DC = max(10, damage // 2)."""
+    dc = max(10, damage // 2)
+    result = saving_throw(char, "constitution", dc)
+    return result
+
+
 # --- XP thresholds (5.5e 2024) ---
 XP_THRESHOLDS: dict[int, int] = {
     1: 0, 2: 300, 3: 900, 4: 2700, 5: 6500,

@@ -36,6 +36,7 @@ class GameSession(Base):
     _last_actions: Mapped[str] = mapped_column("last_actions", Text, default="[]")
     _last_action_styles: Mapped[str] = mapped_column("last_action_styles", Text, default="[]")
     currency_name: Mapped[str] = mapped_column(String(100), default="gold")
+    concentrating_on: Mapped[str] = mapped_column(String(200), default="")
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -100,7 +101,7 @@ class GameSession(Base):
         return self.message_history[-n:]
 
     def to_state_dict(self) -> dict:
-        return {
+        d = {
             "genre": self.genre,
             "tone": self.tone,
             "theme": self.theme,
@@ -112,3 +113,6 @@ class GameSession(Base):
             "active_npcs": self.active_npcs,
             "active_enemies": self.active_enemies,
         }
+        if self.concentrating_on:
+            d["concentrating_on"] = self.concentrating_on
+        return d

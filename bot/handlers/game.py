@@ -722,10 +722,32 @@ async def _process_player_action(
     any_succeeded = False
     any_failed = False
     had_checks = False
+    ru = lang == "ru"
+    total_damage_taken = 0
 
+    cond_flags = engine.get_condition_flags(char)
+
+    # --- Enemy info display ---
+    for ei in (decision.enemy_info or []):
+        if ei.name:
+            tier_map_ru = {"weak": "Слабый", "medium": "Средний", "tough": "Крепкий", "deadly": "Опасный"}
+            tier_map_en = {"weak": "Weak", "medium": "Medium", "tough": "Tough", "deadly": "Deadly"}
+            tier = (tier_map_ru if ru else tier_map_en).get(ei.hp_tier, ei.hp_tier)
+            role_str = f" ({ei.role})" if ei.role else ""
+            lines = [f"👁 <b>{ei.name}</b>{role_str}"]
+            lines.append(f"🛡 AC {ei.ac} | ❤️ {tier}")
+            if ei.visible_gear:
+                lines.append(f"⚔️ {ei.visible_gear}")
+            mechanics_lines.append("\n".join(lines))
+
+    # --- Skill checks ---
     for sc in decision.skill_checks:
         try:
-            r = engine.skill_check(char, sc.skill, sc.dc, sc.advantage, sc.disadvantage)
+            adv = sc.advantage
+            disadv = sc.disadvantage
+            if cond_flags.get("ability_check_disadvantage"):
+                disadv = True
+            r = engine.skill_check(char, sc.skill, sc.dc, adv, disadv)
             mechanics_lines.append(r.display_localized(lang))
             had_checks = True
             if r.success:
@@ -735,9 +757,22 @@ async def _process_player_action(
         except Exception:
             log.warning("Skill check failed: %s", sc.skill)
 
+    # --- Saving throws ---
     for st in decision.saving_throws:
         try:
-            r = engine.saving_throw(char, st.ability, st.dc, st.advantage, st.disadvantage)
+            adv = st.advantage
+            disadv = st.disadvantage
+            if cond_flags.get("auto_fail_str_dex_saves") and st.ability in ("strength", "dexterity"):
+                mechanics_lines.append(
+                    f"🛡 <b>{'Спасбросок' if ru else 'Save'} {st.ability}</b>\n"
+                    f"❌ <b>{'Автопровал (оглушён/парализован)!' if ru else 'Auto-fail (stunned/paralyzed)!'}</b>"
+                )
+                any_failed = True
+                had_checks = True
+                continue
+            if cond_flags.get("dex_save_disadvantage") and st.ability == "dexterity":
+                disadv = True
+            r = engine.saving_throw(char, st.ability, st.dc, adv, disadv)
             mechanics_lines.append(r.display_localized(lang))
             had_checks = True
             if r.success:
@@ -747,11 +782,19 @@ async def _process_player_action(
         except Exception:
             log.warning("Saving throw failed: %s", st.ability)
 
+    # --- Player attack ---
     if decision.attack_target_ac and decision.attack_target_ac > 0:
         try:
+            atk_adv = decision.attack_advantage
+            atk_disadv = decision.attack_disadvantage
+            if cond_flags.get("attack_disadvantage"):
+                atk_disadv = True
+            if cond_flags.get("advantage_against"):
+                pass
             atk = engine.make_attack(
                 char, decision.attack_target_ac,
-                decision.attack_damage_dice or "1d8", decision.attack_ability or "strength", True,
+                decision.attack_damage_dice or "1d8", decision.attack_ability or "strength",
+                True, advantage=atk_adv, disadvantage=atk_disadv,
             )
             atk_display = atk.display_localized(lang)
             t_hp = decision.attack_target_hp
@@ -762,33 +805,106 @@ async def _process_player_action(
                 any_succeeded = True
                 if t_hp > 0 and t_max > 0 and atk.damage:
                     remaining = max(0, t_hp - atk.damage)
-                    hp_lbl = "HP цели" if lang == "ru" else "Target HP"
+                    hp_lbl = "HP цели" if ru else "Target HP"
                     mechanics_lines.append(f"🎯 {hp_lbl}: <b>{remaining}</b>/{t_max}")
             else:
                 if t_hp > 0 and t_max > 0:
-                    hp_lbl = "HP цели" if lang == "ru" else "Target HP"
+                    hp_lbl = "HP цели" if ru else "Target HP"
                     mechanics_lines.append(f"🎯 {hp_lbl}: {t_hp}/{t_max}")
-            else:
                 any_failed = True
         except Exception:
             log.warning("Attack failed: ac=%s dice=%s", decision.attack_target_ac, decision.attack_damage_dice)
 
+    # --- NPC actions (attack rolls OR save-based) ---
+    npc_adv_against = cond_flags.get("advantage_against", False)
     for npc in decision.npc_actions:
-        if npc.damage_dice:
-            try:
-                atk_bonus = npc.attack_bonus if hasattr(npc, 'attack_bonus') else 3
-                npc_atk = engine.roll("1d20", modifier=atk_bonus, reason=f"{npc.name}")
+        if not npc.damage_dice and not npc.save_dc:
+            continue
+        try:
+            if npc.save_dc and npc.save_dc > 0:
+                # Save-based attack (breath weapon, Force choke, etc.)
+                ability = npc.save_ability or "dexterity"
+                save_disadv = False
+                auto_fail = False
+                if cond_flags.get("auto_fail_str_dex_saves") and ability in ("strength", "dexterity"):
+                    auto_fail = True
+                if cond_flags.get("dex_save_disadvantage") and ability == "dexterity":
+                    save_disadv = True
+
+                ability_ru = engine._ABILITY_NAMES_RU.get(ability, ability)
+                header = (
+                    f"🔥 <b>{npc.name}</b>: {npc.action or ('способность' if ru else 'ability')}\n"
+                    f"🛡 <b>{'Спасбросок' if ru else 'Save'} {ability_ru if ru else ability.capitalize()}</b> "
+                    f"({'нужно' if ru else 'need'} <b>{npc.save_dc}+</b>)"
+                )
+                if auto_fail:
+                    save_success = False
+                    mechanics_lines.append(
+                        f"{header}\n❌ <b>{'Автопровал!' if ru else 'Auto-fail!'}</b>"
+                    )
+                else:
+                    sr = engine.saving_throw(char, ability, npc.save_dc, disadvantage=save_disadv)
+                    save_success = sr.success
+                    roll_line = (
+                        f"🎲 {'Бросок' if ru else 'Roll'}: <b>{sr.roll_result.total}</b> "
+                        f"({sr.roll_result.detail}){sr.roll_result.nat_tag}"
+                    )
+                    tag = f"✅ <b>{'Успех!' if ru else 'Success!'}</b>" if save_success else f"❌ <b>{'Провал!' if ru else 'Failure!'}</b>"
+                    mechanics_lines.append(f"{header}\n{roll_line}\n{tag}")
+
+                if npc.damage_dice:
+                    dmg = engine.roll(npc.damage_dice, reason=f"{npc.name}")
+                    actual_dmg = dmg.total
+                    if save_success and npc.half_on_save:
+                        actual_dmg = max(1, actual_dmg // 2)
+                        half_note = f" ({'половина' if ru else 'halved'})" if actual_dmg else ""
+                    elif save_success and not npc.half_on_save:
+                        actual_dmg = 0
+                        half_note = f" ({'нет урона' if ru else 'no damage'})"
+                    else:
+                        half_note = ""
+                    if actual_dmg > 0:
+                        hp_line = engine.apply_damage_verbose(char, actual_dmg, lang)
+                        mechanics_lines.append(
+                            f"⚔️ {'Урон' if ru else 'Damage'}: <b>{actual_dmg}</b> "
+                            f"({dmg.detail}){half_note}"
+                        )
+                        mechanics_lines.append(hp_line)
+                        total_damage_taken += actual_dmg
+                    elif half_note:
+                        mechanics_lines.append(
+                            f"⚔️ {'Урон' if ru else 'Damage'}: <b>0</b>{half_note}"
+                        )
+
+                if not save_success and npc.condition:
+                    cond = npc.condition.lower()
+                    current = char.conditions or []
+                    if cond not in [c.lower() for c in current]:
+                        current.append(cond)
+                        char.conditions = current
+                        cond_name = engine._CONDITION_NAMES_RU.get(cond, cond) if ru else cond
+                        mechanics_lines.append(f"⚠️ {'Состояние' if ru else 'Condition'}: <b>{cond_name}</b>")
+
+            elif npc.damage_dice:
+                # Standard attack roll
+                atk_bonus = npc.attack_bonus or 3
+                npc_atk = engine.roll(
+                    "1d20", modifier=atk_bonus,
+                    advantage=npc_adv_against, reason=f"{npc.name}",
+                )
                 player_ac = char.ac
                 npc_hit = npc_atk.natural_20 or npc_atk.total >= player_ac
-                ru = lang == "ru"
                 nat = npc_atk.nat_tag
                 header = (
                     f"🛡 <b>{npc.name}</b> {'атакует' if ru else 'attacks'} "
                     f"→ {'твой' if ru else 'your'} AC {player_ac}"
                 )
+                adv_note = ""
+                if npc_adv_against:
+                    adv_note = f" ({'с преимуществом' if ru else 'with advantage'})"
                 roll_line = (
                     f"🎲 {'Бросок' if ru else 'Roll'}: <b>{npc_atk.total}</b> "
-                    f"({npc_atk.detail}){nat}"
+                    f"({npc_atk.detail}){nat}{adv_note}"
                 )
                 if npc_hit:
                     dice = npc.damage_dice
@@ -810,16 +926,27 @@ async def _process_player_action(
                         f"{header}\n{roll_line}\n{hit_tag}\n{dmg_line}"
                     )
                     mechanics_lines.append(hp_line)
+                    total_damage_taken += dmg.total
+
+                    if npc.condition:
+                        cond = npc.condition.lower()
+                        current = char.conditions or []
+                        if cond not in [c.lower() for c in current]:
+                            current.append(cond)
+                            char.conditions = current
+                            cond_name = engine._CONDITION_NAMES_RU.get(cond, cond) if ru else cond
+                            mechanics_lines.append(f"⚠️ {'Состояние' if ru else 'Condition'}: <b>{cond_name}</b>")
                 else:
                     miss_tag = f"❌ <b>{'Промах!' if ru else 'Miss!'}</b>"
                     mechanics_lines.append(f"{header}\n{roll_line}\n{miss_tag}")
-            except Exception:
-                log.warning("NPC attack failed: %s", npc.damage_dice)
+        except Exception:
+            log.warning("NPC action failed: %s", npc.name, exc_info=True)
 
     for sc in decision.stat_changes:
         if sc.stat == "current_hp" and sc.delta < 0:
             hp_line = engine.apply_damage_verbose(char, abs(sc.delta), lang)
             mechanics_lines.append(hp_line)
+            total_damage_taken += abs(sc.delta)
         elif sc.stat == "current_hp" and sc.delta > 0:
             old_hp_val = char.current_hp
             engine.apply_healing(char, sc.delta)
@@ -844,6 +971,53 @@ async def _process_player_action(
         char.gold = max(0, char.gold + decision.gold_change)
         sign = "+" if decision.gold_change > 0 else ""
         mechanics_lines.append(f"💰 <b>{sign}{decision.gold_change}</b> {currency}")
+
+    # --- Condition changes from AI ---
+    for cc in (decision.condition_changes or []):
+        cc = cc.strip()
+        if not cc:
+            continue
+        current = char.conditions or []
+        if cc.startswith("-"):
+            cond = cc[1:].strip().lower()
+            current = [c for c in current if c.lower() != cond]
+            char.conditions = current
+            cond_name = engine._CONDITION_NAMES_RU.get(cond, cond) if ru else cond
+            mechanics_lines.append(f"✅ {'Снято' if ru else 'Removed'}: <b>{cond_name}</b>")
+        elif cc.startswith("+") or cc[0].isalpha():
+            cond = cc.lstrip("+").strip().lower()
+            if cond not in [c.lower() for c in current]:
+                current.append(cond)
+                char.conditions = current
+                cond_name = engine._CONDITION_NAMES_RU.get(cond, cond) if ru else cond
+                mechanics_lines.append(f"⚠️ {'Состояние' if ru else 'Condition'}: <b>{cond_name}</b>")
+
+    # --- Concentration ---
+    if decision.concentration_spell:
+        old_conc = gs.concentrating_on
+        if old_conc:
+            mechanics_lines.append(
+                f"🔮 {'Концентрация прервана' if ru else 'Concentration broken'}: <b>{old_conc}</b>"
+            )
+        gs.concentrating_on = decision.concentration_spell
+        mechanics_lines.append(
+            f"🔮 {'Концентрация' if ru else 'Concentrating'}: <b>{decision.concentration_spell}</b>"
+        )
+
+    if total_damage_taken > 0 and gs.concentrating_on:
+        con_save = engine.concentration_save(char, total_damage_taken, lang)
+        dc = max(10, total_damage_taken // 2)
+        mechanics_lines.append(con_save.display_localized(lang))
+        if not con_save.success:
+            mechanics_lines.append(
+                f"🔮 {'Концентрация потеряна' if ru else 'Concentration lost'}: <b>{gs.concentrating_on}</b>"
+            )
+            gs.concentrating_on = ""
+
+    # --- Active conditions display ---
+    if char.conditions:
+        cond_display = engine.format_conditions(char.conditions, lang)
+        mechanics_lines.append(cond_display)
 
     # --- Smart XP fallback ---
     xp_to_grant = decision.xp_gained
@@ -941,7 +1115,7 @@ async def _process_player_action(
                 else "▶️ <i>What do you do?</i>")
         parts.append(hint)
 
-    parts.append(f"<code>{compact_stat_bar(char, lang, currency)}</code>")
+    parts.append(f"<code>{compact_stat_bar(char, lang, currency, concentration=gs.concentrating_on)}</code>")
 
     if leveled_up:
         parts.append(t("LEVEL_UP", lang, name=char.name, level=str(char.level),

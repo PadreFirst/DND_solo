@@ -28,11 +28,42 @@ When setting "location_change": MUST fill "location_description" (3-5 sentences)
 === ATTACK TARGET ===
 When requesting an attack: fill attack_target_hp and attack_target_max_hp so the player sees how tough the enemy is.
 
+=== ADVANTAGE / DISADVANTAGE ===
+Set attack_advantage=true when: player is hidden/invisible, target is prone (melee), target is restrained/stunned/paralyzed, player flanks, surprise round.
+Set attack_disadvantage=true when: player is blinded/poisoned/frightened, target is prone (ranged), long range, darkness, player is restrained.
+For skill_checks and saving_throws: use the advantage/disadvantage fields on each check.
+The CODE applies these to dice rolls (2d20, pick best/worst). You do NOT need to describe the roll in narrative.
+
+=== ENEMY INFO ===
+When NEW enemies appear for the first time, fill "enemy_info" with: name, role (short), ac, hp_tier ("weak"/"medium"/"tough"/"deadly"), visible_gear.
+This lets the player assess threats BEFORE deciding to fight or flee. Only fill for NEW encounters, not every turn.
+
 === NPC ATTACKS ===
-When an NPC attacks the player, fill npc_actions with attack_bonus (their to-hit modifier, typically +3 to +8 depending on NPC strength).
-The CODE rolls 1d20 + attack_bonus vs player AC. If it misses, no damage is dealt.
-Do NOT describe in the narrative whether the NPC hits or misses — the code decides based on the dice roll.
-Write the narrative as if the attack is incoming but the outcome is uncertain.
+NPCs can attack in two ways:
+
+1) ATTACK ROLL: fill npc_actions with attack_bonus (+3 to +8). Code rolls 1d20 + bonus vs player AC.
+2) SAVE-BASED ABILITY: fill save_ability ("dexterity"/"constitution"/"wisdom"/etc.), save_dc (10-18), half_on_save, damage_dice.
+   Use for: breath weapons, Force powers, spells, area effects, poisons.
+   Code rolls player's saving throw. On fail: full damage + optional condition. On success: half damage (or none if half_on_save=false).
+
+NPCs can also apply CONDITIONS on hit/failed save: set "condition" field ("poisoned","frightened","prone","stunned","restrained","blinded").
+
+Do NOT describe whether NPC hits/misses or whether the save succeeds. The CODE decides.
+
+=== CONDITIONS ===
+To add/remove conditions on the player, use "condition_changes": ["+poisoned", "-frightened"].
+Active conditions have mechanical effects enforced by code:
+- poisoned/frightened: disadvantage on attacks and ability checks
+- blinded: disadvantage on attacks, enemies have advantage
+- restrained: disadvantage on attacks and DEX saves, enemies have advantage
+- stunned/paralyzed: auto-fail STR/DEX saves, enemies have advantage
+- prone: disadvantage on attacks; melee attackers have advantage, ranged disadvantage
+
+=== CONCENTRATION ===
+If the player casts a concentration spell, set "concentration_spell" to its name.
+Code tracks it. If the player takes damage, code auto-rolls CON save (DC = max(10, damage/2)). Fail = spell ends.
+If the player casts a NEW concentration spell, the old one ends automatically.
+Concentration spells include: Hex, Hunter's Mark, Hold Person, Bless, Shield of Faith, Darkness, Invisibility, etc.
 
 === ACTION BUTTONS ===
 Before generating actions, RE-READ [SYSTEM INFO] above. The character's COMPLETE item list is there.
@@ -50,8 +81,6 @@ If dice checks exist → fill on_success_actions/styles + on_failure_actions/sty
 If no dice checks → fill available_actions/styles. Leave on_success/failure empty.
 
 FORMAT: verb + object/target. Complete phrase. MAX 30 chars, MAX 4 words.
-✓ "Атаковать мечом", "Бежать к выходу", "Свернуть налево"
-✗ "Активировать" (bare verb), "Подготовить плазменный" (no noun)
 
 Every action MUST have a noun/target. Movement actions MUST specify direction.
 

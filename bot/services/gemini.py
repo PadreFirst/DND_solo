@@ -142,11 +142,23 @@ class StatChange(BaseModel):
     delta: int = Field(default=0, description="Change amount (negative for decrease)")
 
 
+class EnemyInfo(BaseModel):
+    name: str = ""
+    role: str = Field(default="", description="Short role: 'bounty hunter', 'stormtrooper', 'sith apprentice'")
+    ac: int = Field(default=12, description="Enemy Armor Class")
+    hp_tier: str = Field(default="medium", description="'weak' (~1-15 HP), 'medium' (~16-40), 'tough' (~41-80), 'deadly' (~80+)")
+    visible_gear: str = Field(default="", description="Weapons/armor the player can see")
+
+
 class NPCAction(BaseModel):
     name: str = ""
     action: str = ""
     damage_dice: str | None = ""
     attack_bonus: int = Field(default=3, description="NPC attack roll modifier (1d20 + this vs player AC). Typical: +3 to +8.")
+    save_ability: str = Field(default="", description="If this is a save-based attack (breath weapon, Force choke): 'dexterity','constitution','wisdom', etc.")
+    save_dc: int = Field(default=0, description="DC for the saving throw. If >0, this is a save-based attack instead of an attack roll.")
+    half_on_save: bool = Field(default=True, description="True = half damage on successful save. False = no damage on success.")
+    condition: str = Field(default="", description="Condition to apply on hit/failed save: 'poisoned','frightened','prone','blinded','restrained','stunned'")
 
 
 class GameResponse(BaseModel):
@@ -161,7 +173,12 @@ class GameResponse(BaseModel):
     attack_target_ac: int = 0
     attack_damage_dice: str = ""
     attack_ability: str = "strength"
+    attack_advantage: bool = Field(default=False, description="True if player has advantage on this attack (surprise, prone target, flanking)")
+    attack_disadvantage: bool = Field(default=False, description="True if player has disadvantage (darkness, poisoned, long range)")
+    enemy_info: list[EnemyInfo] = Field(default_factory=list, description="Fill when NEW enemies appear. Name, AC, HP tier, visible gear.")
     npc_actions: list[NPCAction] = Field(default_factory=list)
+    condition_changes: list[str] = Field(default_factory=list, description="Conditions to add/remove on player. Prefix with '+' to add, '-' to remove. E.g. ['+poisoned', '-frightened']")
+    concentration_spell: str = Field(default="", description="If player casts a concentration spell this turn, its name. Empty if not.")
     stat_changes: list[StatChange] = Field(default_factory=list)
     inventory_changes: list[ItemChange] = Field(default_factory=list)
     xp_gained: int = 0

@@ -34,14 +34,17 @@ def progress_bar(current: int, maximum: int, length: int = 10) -> str:
     return "█" * filled + "░" * (length - filled)
 
 
-def compact_stat_bar(char: Character, lang: str = "en", currency: str = "") -> str:
+def compact_stat_bar(char: Character, lang: str = "en", currency: str = "", concentration: str = "") -> str:
     cur = currency or ("зол." if lang == "ru" else "g")
-    return (
+    bar = (
         f"❤️ {char.current_hp}/{char.max_hp} HP"
         f" | 🛡 AC {char.armor_class}"
         f" | ⭐ Lv.{char.level}"
         f" | 💰 {char.gold} {cur}"
     )
+    if concentration:
+        bar += f" | 🔮 {concentration}"
+    return bar
 
 
 _L = {
