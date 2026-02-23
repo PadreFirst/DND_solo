@@ -605,16 +605,29 @@ class AttackResult:
     target_ac: int = 0
 
     def display_localized(self, lang: str = "en") -> str:
-        ac_info = f" vs AC {self.target_ac}" if self.target_ac else ""
-        lines = [f"🎲 {self.attack_roll.display}{ac_info}"]
+        ru = lang == "ru"
+        ac_lbl = f"→ AC {self.target_ac}" if self.target_ac else ""
+        lines = [f"⚔️ <b>{'Атака' if ru else 'Attack'}</b> {ac_lbl}"]
+        nat = self.attack_roll.nat_tag
+        lines.append(
+            f"🎲 {'Бросок' if ru else 'Roll'}: <b>{self.attack_roll.total}</b> "
+            f"({self.attack_roll.detail}){nat}"
+        )
         if self.critical:
-            lines.append("💥 КРИТ!" if lang == "ru" else "💥 CRITICAL HIT!")
+            lines.append(f"💥 <b>{'КРИТ!' if ru else 'CRITICAL HIT!'}</b>")
         elif self.hit:
-            lines.append("✅ Попадание!" if lang == "ru" else "✅ Hit!")
+            lines.append(f"✅ <b>{'Попадание!' if ru else 'Hit!'}</b>")
         else:
-            lines.append("❌ Промах!" if lang == "ru" else "❌ Miss!")
+            hp_info = ""
+            if self.target_ac:
+                miss = self.target_ac - self.attack_roll.total
+                hp_info = f" ({'не хватило' if ru else 'short by'} {miss})" if miss > 0 else ""
+            lines.append(f"❌ <b>{'Промах!' if ru else 'Miss!'}</b>{hp_info}")
         if self.damage_roll:
-            lines.append(f"⚔️ Урон: {self.damage_roll.display}" if lang == "ru" else f"⚔️ Damage: {self.damage_roll.display}")
+            lines.append(
+                f"⚔️ {'Урон' if ru else 'Damage'}: <b>{self.damage_roll.total}</b> "
+                f"({self.damage_roll.detail})"
+            )
         return "\n".join(lines)
 
     @property
@@ -645,12 +658,19 @@ class SkillCheckResult:
     skill_name: str
 
     def display_localized(self, lang: str = "en") -> str:
-        name = _SKILL_NAMES_RU.get(self.skill_name, self.skill_name) if lang == "ru" else self.skill_name
-        if lang == "ru":
-            tag = "✅ Успех!" if self.success else "❌ Провал!"
-            return f"🎲 {name} (нужно {self.dc}+): {self.roll_result.display}\n{tag}"
-        tag = "✅ Success!" if self.success else "❌ Failure!"
-        return f"🎲 {name} (need {self.dc}+): {self.roll_result.display}\n{tag}"
+        ru = lang == "ru"
+        name = _SKILL_NAMES_RU.get(self.skill_name, self.skill_name) if ru else self.skill_name
+        nat = self.roll_result.nat_tag
+        header = f"🎲 <b>{name}</b> ({'нужно' if ru else 'need'} <b>{self.dc}+</b>)"
+        roll_line = (
+            f"{'Бросок' if ru else 'Roll'}: <b>{self.roll_result.total}</b> "
+            f"({self.roll_result.detail}){nat}"
+        )
+        if self.success:
+            tag = f"✅ <b>{'Успех!' if ru else 'Success!'}</b>"
+        else:
+            tag = f"❌ <b>{'Провал!' if ru else 'Failure!'}</b>"
+        return f"{header}\n{roll_line}\n{tag}"
 
     @property
     def display(self) -> str:
@@ -665,12 +685,20 @@ class SavingThrowResult:
     ability: str
 
     def display_localized(self, lang: str = "en") -> str:
-        name = _ABILITY_NAMES_RU.get(self.ability, self.ability) if lang == "ru" else self.ability.capitalize()
-        if lang == "ru":
-            tag = "✅ Успех!" if self.success else "❌ Провал!"
-            return f"🎲 Спасбросок {name} (нужно {self.dc}+): {self.roll_result.display}\n{tag}"
-        tag = "✅ Success!" if self.success else "❌ Failure!"
-        return f"🎲 {name} save (need {self.dc}+): {self.roll_result.display}\n{tag}"
+        ru = lang == "ru"
+        name = _ABILITY_NAMES_RU.get(self.ability, self.ability) if ru else self.ability.capitalize()
+        nat = self.roll_result.nat_tag
+        lbl = "Спасбросок" if ru else "Save"
+        header = f"🛡 <b>{lbl} {name}</b> ({'нужно' if ru else 'need'} <b>{self.dc}+</b>)"
+        roll_line = (
+            f"🎲 {'Бросок' if ru else 'Roll'}: <b>{self.roll_result.total}</b> "
+            f"({self.roll_result.detail}){nat}"
+        )
+        if self.success:
+            tag = f"✅ <b>{'Успех!' if ru else 'Success!'}</b>"
+        else:
+            tag = f"❌ <b>{'Провал!' if ru else 'Failure!'}</b>"
+        return f"{header}\n{roll_line}\n{tag}"
 
     @property
     def display(self) -> str:
@@ -689,17 +717,21 @@ class DeathSaveResult:
     def display_localized(self, lang: str = "en") -> str:
         ru = lang == "ru"
         label = "Спасбросок от смерти" if ru else "Death save"
+        need = "нужно <b>10+</b>" if ru else "need <b>10+</b>"
+        nat = self.roll_result.nat_tag
+        roll_line = (
+            f"🎲 <b>{label}</b> ({need})\n"
+            f"{'Бросок' if ru else 'Roll'}: <b>{self.roll_result.total}</b> "
+            f"({self.roll_result.detail}){nat}"
+        )
         if self.stabilized:
-            tag = "💚 Стабилизирован!" if ru else "💚 Stabilized!"
-            return f"🎲 {label}: {self.roll_result.display}\n{tag}"
+            return f"{roll_line}\n💚 <b>{'Стабилизирован!' if ru else 'Stabilized!'}</b>"
         if self.dead:
-            tag = "💀 Мёртв..." if ru else "💀 Dead..."
-            return f"🎲 {label}: {self.roll_result.display}\n{tag}"
+            return f"{roll_line}\n💀 <b>{'Мёртв...' if ru else 'Dead...'}</b>"
         tag = "✅" if self.success else "❌"
         s = "✅" * self.total_successes + "⬜" * (3 - self.total_successes)
         f_ = "❌" * self.total_failures + "⬜" * (3 - self.total_failures)
-        counter = f"  [{s} | {f_}]"
-        return f"🎲 {label}: {self.roll_result.display} {tag}{counter}"
+        return f"{roll_line} {tag}\n{s} | {f_}"
 
 
 def make_attack(
@@ -841,14 +873,10 @@ def apply_damage(char: Character, damage: int) -> str:
 def apply_damage_verbose(char: Character, damage: int, lang: str = "en") -> str:
     old_hp = char.current_hp
     status = apply_damage(char, damage)
-    if lang == "ru":
-        line = f"💔 -{damage} HP → {char.current_hp}/{char.max_hp}"
-        if status == "unconscious":
-            line += " ⚠️ Без сознания!"
-    else:
-        line = f"💔 -{damage} HP → {char.current_hp}/{char.max_hp}"
-        if status == "unconscious":
-            line += " ⚠️ Unconscious!"
+    ru = lang == "ru"
+    line = f"💔 <b>-{damage} HP</b> → {char.current_hp}/{char.max_hp}"
+    if status == "unconscious":
+        line += f" ⚠️ <b>{'Без сознания!' if ru else 'Unconscious!'}</b>"
     return line
 
 

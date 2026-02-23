@@ -27,6 +27,21 @@ class RollResult:
             tag = " NAT 1!"
         return f"{self.dice}{mod_str} = [{rolls_str}]{mod_str} = {self.total}{tag}"
 
+    @property
+    def detail(self) -> str:
+        """Compact dice breakdown for parenthetical display: (1d20 +3 = [14] +3)"""
+        rolls_str = ", ".join(str(r) for r in self.rolls)
+        mod_str = f" {self.modifier:+d}" if self.modifier else ""
+        return f"{self.dice}{mod_str} = [{rolls_str}]{mod_str}"
+
+    @property
+    def nat_tag(self) -> str:
+        if self.natural_20:
+            return " 🌟 NAT 20!"
+        if self.natural_1:
+            return " 💀 NAT 1!"
+        return ""
+
 
 def _roll_die(sides: int) -> int:
     return secrets.randbelow(sides) + 1

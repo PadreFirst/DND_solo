@@ -756,16 +756,18 @@ async def _process_player_action(
             atk_display = atk.display_localized(lang)
             t_hp = decision.attack_target_hp
             t_max = decision.attack_target_max_hp
-            if t_hp > 0 and t_max > 0:
-                atk_display += f" (HP: {t_hp}/{t_max})"
             mechanics_lines.append(atk_display)
             had_checks = True
             if atk.hit:
                 any_succeeded = True
                 if t_hp > 0 and t_max > 0 and atk.damage:
                     remaining = max(0, t_hp - atk.damage)
-                    target_lbl = "HP цели" if lang == "ru" else "Target HP"
-                    mechanics_lines.append(f"⚔️ → {target_lbl}: {remaining}/{t_max}")
+                    hp_lbl = "HP цели" if lang == "ru" else "Target HP"
+                    mechanics_lines.append(f"🎯 {hp_lbl}: <b>{remaining}</b>/{t_max}")
+            else:
+                if t_hp > 0 and t_max > 0:
+                    hp_lbl = "HP цели" if lang == "ru" else "Target HP"
+                    mechanics_lines.append(f"🎯 {hp_lbl}: {t_hp}/{t_max}")
             else:
                 any_failed = True
         except Exception:
@@ -778,6 +780,16 @@ async def _process_player_action(
                 npc_atk = engine.roll("1d20", modifier=atk_bonus, reason=f"{npc.name}")
                 player_ac = char.ac
                 npc_hit = npc_atk.natural_20 or npc_atk.total >= player_ac
+                ru = lang == "ru"
+                nat = npc_atk.nat_tag
+                header = (
+                    f"🛡 <b>{npc.name}</b> {'атакует' if ru else 'attacks'} "
+                    f"→ {'твой' if ru else 'your'} AC {player_ac}"
+                )
+                roll_line = (
+                    f"🎲 {'Бросок' if ru else 'Roll'}: <b>{npc_atk.total}</b> "
+                    f"({npc_atk.detail}){nat}"
+                )
                 if npc_hit:
                     dice = npc.damage_dice
                     if npc_atk.natural_20:
@@ -786,19 +798,21 @@ async def _process_player_action(
                         dice = f"{cnt}d{parts_d[1]}"
                     dmg = engine.roll(dice, reason=f"{npc.name}")
                     hp_line = engine.apply_damage_verbose(char, dmg.total, lang)
-                    hit_lbl = "Крит!" if npc_atk.natural_20 else "Попадание!"
-                    if lang != "ru":
-                        hit_lbl = "Crit!" if npc_atk.natural_20 else "Hit!"
-                    mechanics_lines.append(
-                        f"{npc.name}: {npc_atk.display} vs AC {player_ac} ✅ {hit_lbl}"
+                    if npc_atk.natural_20:
+                        hit_tag = f"💥 <b>{'КРИТ!' if ru else 'CRIT!'}</b>"
+                    else:
+                        hit_tag = f"✅ <b>{'Попадание!' if ru else 'Hit!'}</b>"
+                    dmg_line = (
+                        f"⚔️ {'Урон' if ru else 'Damage'}: <b>{dmg.total}</b> "
+                        f"({dmg.detail})"
                     )
-                    mechanics_lines.append(f"{npc.name}: {dmg.display}")
+                    mechanics_lines.append(
+                        f"{header}\n{roll_line}\n{hit_tag}\n{dmg_line}"
+                    )
                     mechanics_lines.append(hp_line)
                 else:
-                    miss_lbl = "Промах!" if lang == "ru" else "Miss!"
-                    mechanics_lines.append(
-                        f"{npc.name}: {npc_atk.display} vs AC {player_ac} ❌ {miss_lbl}"
-                    )
+                    miss_tag = f"❌ <b>{'Промах!' if ru else 'Miss!'}</b>"
+                    mechanics_lines.append(f"{header}\n{roll_line}\n{miss_tag}")
             except Exception:
                 log.warning("NPC attack failed: %s", npc.damage_dice)
 
@@ -811,7 +825,7 @@ async def _process_player_action(
             engine.apply_healing(char, sc.delta)
             healed = char.current_hp - old_hp_val
             if healed > 0:
-                mechanics_lines.append(f"💚 +{healed} HP → {char.current_hp}/{char.max_hp}")
+                mechanics_lines.append(f"💚 <b>+{healed} HP</b> → {char.current_hp}/{char.max_hp}")
 
     if decision.inventory_changes:
         changes = [
@@ -829,7 +843,7 @@ async def _process_player_action(
     if decision.gold_change:
         char.gold = max(0, char.gold + decision.gold_change)
         sign = "+" if decision.gold_change > 0 else ""
-        mechanics_lines.append(f"💰 {sign}{decision.gold_change} {currency}")
+        mechanics_lines.append(f"💰 <b>{sign}{decision.gold_change}</b> {currency}")
 
     # --- Smart XP fallback ---
     xp_to_grant = decision.xp_gained
@@ -852,7 +866,7 @@ async def _process_player_action(
     old_hp = char.max_hp
     if xp_to_grant > 0:
         leveled_up = engine.grant_xp(char, xp_to_grant)
-        mechanics_lines.append(f"✨ +{xp_to_grant} XP")
+        mechanics_lines.append(f"✨ <b>+{xp_to_grant} XP</b>")
 
     if decision.location_change:
         _lo = player_action.lower()
