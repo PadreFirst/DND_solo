@@ -258,6 +258,8 @@ async def on_char_review(cb: CallbackQuery, db: AsyncSession) -> None:
         user.onboarding_state = OnboardingState.PLAYING
 
         actions = mission.opening_actions if mission.opening_actions else _default_actions(user.language)
+        gs.last_actions = actions
+        gs.last_action_styles = []
         await cb.message.answer(
             t("GAME_START", user.language, opening_scene=truncate_for_telegram(opening, 3500)),
             parse_mode="HTML",
