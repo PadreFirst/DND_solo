@@ -21,7 +21,7 @@ git fetch origin
 git reset --hard origin/master
 
 echo "[3/6] Installing dependencies..."
-pip install -r requirements.txt -q
+pip install -r requirements.txt -q --break-system-packages 2>/dev/null || pip install -r requirements.txt -q
 
 echo "[4/6] Database will auto-migrate on startup (no data loss)..."
 
