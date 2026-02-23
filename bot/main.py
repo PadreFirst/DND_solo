@@ -1,10 +1,11 @@
-"""Entry point — starts the bot in polling mode (dev) or webhook mode (prod)."""
+"""Entry point — starts the bot in polling mode with an embedded web server for the Mini App."""
 from __future__ import annotations
 
 import asyncio
 import logging
 import sys
 
+from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -16,6 +17,7 @@ from bot.handlers.game import router as game_router
 from bot.handlers.inventory import router as inventory_router
 from bot.handlers.start import router as start_router
 from bot.middlewares.db_session import DbSessionMiddleware
+from bot.web.server import create_app
 
 
 def setup_logging() -> None:
@@ -30,6 +32,7 @@ def setup_logging() -> None:
     logging.getLogger("aiosqlite").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.INFO)
+    logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
 
 
 async def set_bot_commands(bot: Bot) -> None:
@@ -42,6 +45,20 @@ async def set_bot_commands(bot: Bot) -> None:
     ]
     await bot.set_my_commands(commands)
     await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+
+
+async def _run_web_server() -> None:
+    log = logging.getLogger(__name__)
+    app = create_app()
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", settings.webapp_port)
+    await site.start()
+    log.info("Web server started on 0.0.0.0:%d", settings.webapp_port)
+    try:
+        await asyncio.Event().wait()
+    finally:
+        await runner.cleanup()
 
 
 async def main() -> None:
@@ -67,8 +84,11 @@ async def main() -> None:
     dp.include_router(inventory_router)
     dp.include_router(game_router)
 
-    log.info("Bot starting in polling mode...")
-    await dp.start_polling(bot)
+    log.info("Bot starting in polling mode + web server on port %d...", settings.webapp_port)
+    await asyncio.gather(
+        dp.start_polling(bot),
+        _run_web_server(),
+    )
 
 
 if __name__ == "__main__":

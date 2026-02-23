@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     gemini_model_light: str = ""
     gemini_proxy: str = ""
 
+    webapp_port: int = 8080
+    webapp_url: str = ""
+
     max_recent_messages: int = 12
     summarize_every_n: int = 15
     personalization_every_n: int = 10

@@ -1,7 +1,9 @@
 """Inline keyboard builders — all text localized."""
 from __future__ import annotations
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+
+from bot.config import settings
 
 # --- World presets: combined genre+tone+theme in one step ---
 
@@ -324,9 +326,19 @@ def rest_keyboard(lang: str) -> InlineKeyboardMarkup:
     ])
 
 
+def _webapp_row(label: str) -> list[InlineKeyboardButton]:
+    if not settings.webapp_url:
+        return []
+    return [InlineKeyboardButton(text=label, web_app=WebAppInfo(url=settings.webapp_url))]
+
+
 def game_menu_keyboard(lang: str) -> InlineKeyboardMarkup:
     if lang == "ru":
-        return InlineKeyboardMarkup(inline_keyboard=[
+        rows = []
+        webapp = _webapp_row("🎮 Панель персонажа")
+        if webapp:
+            rows.append(webapp)
+        rows.extend([
             [
                 InlineKeyboardButton(text="📊 Персонаж", callback_data="gamemenu:stats", style="primary"),
                 InlineKeyboardButton(text="🎒 Инвентарь", callback_data="gamemenu:inv", style="primary"),
@@ -348,7 +360,13 @@ def game_menu_keyboard(lang: str) -> InlineKeyboardMarkup:
             ],
             [InlineKeyboardButton(text="⬅️ Назад к игре", callback_data="gamemenu:close")],
         ])
-    return InlineKeyboardMarkup(inline_keyboard=[
+        return InlineKeyboardMarkup(inline_keyboard=rows)
+
+    rows = []
+    webapp = _webapp_row("🎮 Character Dashboard")
+    if webapp:
+        rows.append(webapp)
+    rows.extend([
         [
             InlineKeyboardButton(text="📊 Character", callback_data="gamemenu:stats", style="primary"),
             InlineKeyboardButton(text="🎒 Inventory", callback_data="gamemenu:inv", style="primary"),
@@ -370,6 +388,7 @@ def game_menu_keyboard(lang: str) -> InlineKeyboardMarkup:
         ],
         [InlineKeyboardButton(text="⬅️ Back to game", callback_data="gamemenu:close")],
     ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def inventory_item_keyboard(item_index: int, lang: str = "en") -> InlineKeyboardMarkup:

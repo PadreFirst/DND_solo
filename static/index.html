@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Character Dashboard</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div id="app">
+    <div id="loading">
+      <div class="spinner"></div>
+      <p class="loading-text">Loading character...</p>
+    </div>
+
+    <div id="error" class="hidden">
+      <div class="error-icon">⚠️</div>
+      <p id="error-text">Character not found</p>
+    </div>
+
+    <div id="dashboard" class="hidden">
+      <!-- Header -->
+      <section class="char-header">
+        <div class="char-name" id="char-name"></div>
+        <div class="char-subtitle" id="char-subtitle"></div>
+        <div class="level-badge" id="level-badge"></div>
+      </section>
+
+      <!-- Combat info -->
+      <section class="combat-row">
+        <div class="combat-stat" id="combat-in">
+          <div class="combat-icon">⚔️</div>
+          <div class="combat-label" id="combat-label"></div>
+        </div>
+      </section>
+
+      <!-- HP Bar -->
+      <section class="bar-section">
+        <div class="bar-header">
+          <span class="bar-label">❤️ HP</span>
+          <span class="bar-value" id="hp-value"></span>
+        </div>
+        <div class="bar-track bar-hp">
+          <div class="bar-fill bar-fill-hp" id="hp-fill"></div>
+        </div>
+      </section>
+
+      <!-- XP Bar -->
+      <section class="bar-section">
+        <div class="bar-header">
+          <span class="bar-label">✨ XP</span>
+          <span class="bar-value" id="xp-value"></span>
+        </div>
+        <div class="bar-track bar-xp">
+          <div class="bar-fill bar-fill-xp" id="xp-fill"></div>
+        </div>
+      </section>
+
+      <!-- Quick Stats -->
+      <section class="quick-stats">
+        <div class="qs-item">
+          <div class="qs-icon">🛡</div>
+          <div class="qs-val" id="ac-val"></div>
+          <div class="qs-lbl" id="ac-lbl">AC</div>
+        </div>
+        <div class="qs-item">
+          <div class="qs-icon">👟</div>
+          <div class="qs-val" id="speed-val"></div>
+          <div class="qs-lbl" id="speed-lbl">Speed</div>
+        </div>
+        <div class="qs-item">
+          <div class="qs-icon">🎯</div>
+          <div class="qs-val" id="prof-val"></div>
+          <div class="qs-lbl" id="prof-lbl">Prof</div>
+        </div>
+        <div class="qs-item">
+          <div class="qs-icon">💰</div>
+          <div class="qs-val" id="gold-val"></div>
+          <div class="qs-lbl" id="gold-lbl">Gold</div>
+        </div>
+      </section>
+
+      <!-- Ability Scores -->
+      <section class="section">
+        <h2 class="section-title" id="stats-title">Ability Scores</h2>
+        <div class="stats-grid" id="stats-grid"></div>
+      </section>
+
+      <!-- Abilities -->
+      <section class="section" id="abilities-section">
+        <h2 class="section-title" id="abilities-title">Abilities</h2>
+        <div id="abilities-list"></div>
+      </section>
+
+      <!-- Inventory -->
+      <section class="section" id="inventory-section">
+        <h2 class="section-title" id="inv-title">Inventory</h2>
+        <div class="inv-tabs" id="inv-tabs"></div>
+        <div id="inv-list"></div>
+      </section>
+
+      <!-- Quest -->
+      <section class="section" id="quest-section">
+        <h2 class="section-title" id="quest-title">📜 Quest</h2>
+        <div class="quest-text" id="quest-text"></div>
+      </section>
+
+      <!-- Location -->
+      <section class="section" id="location-section">
+        <h2 class="section-title" id="loc-title">📍 Location</h2>
+        <div class="loc-name" id="loc-name"></div>
+        <div class="loc-desc" id="loc-desc"></div>
+      </section>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
