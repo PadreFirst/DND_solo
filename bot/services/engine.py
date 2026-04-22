@@ -191,6 +191,7 @@ def make_skill_check(
     advantage: bool = False,
     disadvantage: bool = False,
     gs: GameSession | None = None,
+    reputation_score: int | None = None,
 ) -> RichRoll:
     key = SKILL_TO_ABILITY.get(skill_name.strip().lower(), "WIS")
     mod = ability_mod(character, key)
@@ -201,10 +202,25 @@ def make_skill_check(
     auto_adv, auto_dis, reasons = compute_auto_modifiers(
         character, gs, roll_kind="check", label=skill_name, ability_key=key,
     )
+    # Encumbered → disadvantage on STR/DEX/CON checks (simplified 5e rule).
+    if is_encumbered(character) and key in ("STR", "DEX", "CON"):
+        auto_dis = True
+        reasons.append("перегруз")
     adv = advantage or auto_adv
     dis = disadvantage or auto_dis
     if adv and dis:
         adv = dis = False
+
+    # Faction reputation modifier on social skills. Only applied when the
+    # caller supplies an NPC's faction rep score — keeps non-social rolls
+    # untouched.
+    rep_mod = 0
+    if reputation_score is not None and is_social_skill(skill_name):
+        rep_mod = reputation_modifier(reputation_score)
+        total_mod += rep_mod
+        if rep_mod:
+            sign = "+" if rep_mod > 0 else ""
+            reasons.append(f"репутация {sign}{rep_mod}")
 
     d20, d20_alt = _roll_d20(adv, dis)
     chosen = _pick_d20(d20, d20_alt, adv, dis)
@@ -215,7 +231,7 @@ def make_skill_check(
         d20=d20, d20_alt=d20_alt,
         advantage=adv, disadvantage=dis,
         ability_key=key, ability_mod_value=mod,
-        proficiency_value=prof_bonus,
+        proficiency_value=prof_bonus + rep_mod,
         total=total, dc=dc, success=total >= dc,
         reasons=reasons,
     )
@@ -532,6 +548,126 @@ def perform_long_rest(character: Character) -> list[str]:
     if cleared:
         lines.append(f"✨ Сняты состояния: {', '.join(cleared)}")
     return lines
+
+
+# ─── Passive perception / carrying / attunement / reputation ────────────
+
+def passive_perception(character: Character) -> int:
+    """5e formula: PP = 10 + WIS mod + prof_bonus (if proficient in perception).
+
+    We use the Russian label 'внимательность' as the perception skill name —
+    matches SKILL_TO_ABILITY.
+    """
+    wis_mod = ability_mod(character, "WIS")
+    profs = [s.lower() for s in json.loads(character.skill_proficiencies_json or "[]")]
+    prof_bonus = character.proficiency_bonus if "внимательность" in profs else 0
+    return 10 + wis_mod + prof_bonus
+
+
+def carrying_capacity_kg(character: Character) -> float:
+    """Simplified 5e: carrying capacity = STR × 7 kg (TZ rule). When the
+    player exceeds this they become encumbered.
+    """
+    abilities = json.loads(character.abilities_json or "{}")
+    str_score = int(abilities.get("STR", 10) or 10)
+    return float(str_score * 7)
+
+
+def current_carry_weight_kg(character: Character) -> float:
+    """Sum of weight_kg × quantity across the inventory. Items without
+    weight are treated as 0 — the LLM populates this field for anything
+    meaningfully heavy.
+    """
+    try:
+        inv = json.loads(character.inventory_json or "[]")
+    except Exception:
+        return 0.0
+    total = 0.0
+    for it in inv:
+        w = float(it.get("weight_kg", 0) or 0)
+        q = int(it.get("quantity", 1) or 1)
+        total += w * q
+    return total
+
+
+def is_encumbered(character: Character) -> bool:
+    return current_carry_weight_kg(character) > carrying_capacity_kg(character)
+
+
+def reputation_modifier(score: int) -> int:
+    """Faction reputation (-100..100) → modifier on social checks.
+
+    Piecewise step (TZ: «репутация двигает соц-бросок»):
+      |score| <  20   → 0
+      |score| 20..49 → ±1
+      |score| 50..79 → ±2
+      |score| ≥ 80    → ±3
+    """
+    s = int(score or 0)
+    mag = abs(s)
+    if mag < 20:
+        return 0
+    if mag < 50:
+        step = 1
+    elif mag < 80:
+        step = 2
+    else:
+        step = 3
+    return step if s > 0 else -step
+
+
+_SOCIAL_SKILLS = {"убеждение", "обман", "запугивание", "выступление", "проницательность"}
+
+
+def is_social_skill(label: str) -> bool:
+    return (label or "").strip().lower() in _SOCIAL_SKILLS
+
+
+# ─── Attunement ──────────────────────────────────────────────────────────
+
+def _attunement_data(character: Character) -> dict:
+    try:
+        data = json.loads(character.attunement_json or '{"max":3,"items":[]}')
+    except Exception:
+        data = {"max": 3, "items": []}
+    data.setdefault("max", 3)
+    data.setdefault("items", [])
+    return data
+
+
+def attuned_items(character: Character) -> list[str]:
+    return [str(x) for x in _attunement_data(character).get("items", [])]
+
+
+def attunement_max(character: Character) -> int:
+    return int(_attunement_data(character).get("max", 3) or 3)
+
+
+def add_attunement(character: Character, item_name: str) -> tuple[bool, str]:
+    """Attune `item_name`. Returns (ok, reason). Enforces TZ limit (3)."""
+    data = _attunement_data(character)
+    name = (item_name or "").strip()
+    if not name:
+        return False, "Не указан предмет."
+    low_items = [s.lower() for s in data["items"]]
+    if name.lower() in low_items:
+        return False, f"{name} уже настроен."
+    if len(data["items"]) >= int(data.get("max", 3) or 3):
+        return False, f"Достигнут лимит настройки ({data['max']}). Сначала сними что-нибудь."
+    data["items"].append(name)
+    character.attunement_json = json.dumps(data, ensure_ascii=False)
+    return True, f"{name} настроен."
+
+
+def remove_attunement(character: Character, item_name: str) -> tuple[bool, str]:
+    data = _attunement_data(character)
+    low = (item_name or "").strip().lower()
+    for i, it in enumerate(list(data["items"])):
+        if str(it).lower() == low:
+            data["items"].pop(i)
+            character.attunement_json = json.dumps(data, ensure_ascii=False)
+            return True, f"{it} снят."
+    return False, f"«{item_name}» не в списке настроенных."
 
 
 # ─── Combat state machine ─────────────────────────────────────────────────

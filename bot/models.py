@@ -114,6 +114,10 @@ class GameSession(Base):
     # applies a disadvantage on Perception and ranged attacks.
     has_light_source: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # Guided onboarding wizard answers (universe + style) between the
+    # button flow and the player's concept message. Cleared on consumption.
+    onboarding_state_json: Mapped[str] = mapped_column(Text, default="")
+
     user: Mapped[User] = relationship(back_populates="session")
 
 

@@ -106,14 +106,21 @@ def _format_inventory_item(it: dict, *, short: bool) -> str:
     qty = int(it.get("quantity", 1) or 1)
     dmg = it.get("damage_dice") or ""
     equipped = bool(it.get("is_equipped"))
+    weight = float(it.get("weight_kg", 0) or 0)
+    needs_att = bool(it.get("requires_attunement"))
 
     parts = [f"{emoji} {name}"]
     if qty > 1:
         parts.append(f"×{qty}")
     if dmg:
         parts.append(f"[урон {dmg}]")
-    if equipped and not short:
-        parts.append("(экип.)")
+    if not short:
+        if weight:
+            parts.append(f"[{weight:g} кг]")
+        if needs_att:
+            parts.append("✨")
+        if equipped:
+            parts.append("(экип.)")
     return " ".join(parts)
 
 
@@ -206,6 +213,10 @@ class GameService:
                 }
                 if it.damage_dice:
                     item["damage_dice"] = it.damage_dice
+                if it.weight_kg:
+                    item["weight_kg"] = float(it.weight_kg)
+                if it.requires_attunement:
+                    item["requires_attunement"] = True
                 inv.append(item)
                 if it.is_equipped:
                     slot = it.item_type or "misc"
@@ -589,12 +600,34 @@ class GameService:
             )
             pre_lines.append(f"⚔ Враги на сцене: {enemies_line}")
 
+        # Passive perception auto-check (no d20). Runs BEFORE explicit rolls
+        # so the narrative can reference the hidden detail already known.
+        if plan.passive_perception_dc and plan.passive_perception_dc > 0:
+            pp = engine.passive_perception(ch)
+            succ = pp >= plan.passive_perception_dc
+            pre_lines.append(
+                f"👁 Пассивная внимательность {pp} vs DC {plan.passive_perception_dc} — "
+                f"{'замечено' if succ else 'не замечено'}"
+            )
+            if succ and plan.passive_perception_reveal:
+                pre_lines.append(f"   ↳ {plan.passive_perception_reveal}")
+
         for rr in plan.rolls:
             if rr.type == "skill":
+                rep_score = None
+                if rr.faction:
+                    fr = await db.scalar(
+                        select(FactionReputation).where(
+                            FactionReputation.user_id == user.id,
+                            FactionReputation.faction_name == rr.faction,
+                        )
+                    )
+                    rep_score = fr.reputation_score if fr else 0
                 rich = engine.make_skill_check(
                     ch, rr.label, rr.dc,
                     advantage=rr.advantage, disadvantage=rr.disadvantage,
                     gs=gs,
+                    reputation_score=rep_score,
                 )
                 pre_lines.append(rich.format(kind="Проверка"))
             elif rr.type == "attack":
@@ -725,6 +758,10 @@ class GameService:
                         new_item["damage_dice"] = change.damage_dice
                     if change.emoji:
                         new_item["emoji"] = change.emoji
+                    if change.weight_kg:
+                        new_item["weight_kg"] = float(change.weight_kg)
+                    if change.requires_attunement:
+                        new_item["requires_attunement"] = True
                     inv.append(new_item)
                     dmg_tag = f" [урон {change.damage_dice}]" if change.damage_dice else ""
                     post_lines.append(
@@ -1214,6 +1251,60 @@ class GameService:
         else:
             lines.append("💥 Провал: компоненты частично испорчены.")
         return "\n".join(lines)
+
+    # ─── Carry weight & attunement ────────────────────────────────────
+
+    @staticmethod
+    def format_carry(ch: Character) -> str:
+        cap = engine.carrying_capacity_kg(ch)
+        cur = engine.current_carry_weight_kg(ch)
+        status = "⚠ Перегруз" if engine.is_encumbered(ch) else "в норме"
+        return (
+            f"🎒 <b>Нагрузка</b>: {cur:g} / {cap:g} кг ({status})\n"
+            f"<i>Вес считается по полю <code>weight_kg</code> у предметов. "
+            f"STR×7 — грузоподъёмность.</i>\n"
+            f"Перегруз даёт помеху на STR/DEX/CON-проверки."
+        )
+
+    @staticmethod
+    def format_attunement(ch: Character) -> str:
+        items = engine.attuned_items(ch)
+        mx = engine.attunement_max(ch)
+        if not items:
+            return (
+                f"✨ <b>Настройка</b>: 0 / {mx}. "
+                f"Нет настроенных предметов.\n"
+                f"<i>Магические вещи (помеченные ✨) работают только после настройки.</i>\n"
+                f"Команды: /attune &lt;предмет&gt;, /unattune &lt;предмет&gt;"
+            )
+        bullets = "\n".join(f" • ✨ {name}" for name in items)
+        return (
+            f"✨ <b>Настройка</b>: {len(items)} / {mx}\n{bullets}\n"
+            f"<i>/unattune &lt;предмет&gt; — снять.</i>"
+        )
+
+    async def attune_item(self, db: AsyncSession, user: User, item_name: str) -> str:
+        ch = await self.ensure_character(db, user)
+        # Require item to exist and to be flagged as needing attunement.
+        inv = json.loads(ch.inventory_json or "[]")
+        low = (item_name or "").strip().lower()
+        matching = next(
+            (it for it in inv
+             if low in (it.get("name") or "").lower()
+             or (it.get("name") or "").lower() in low),
+            None,
+        )
+        if not matching:
+            return f"✨ Предмет «{item_name}» не найден в инвентаре."
+        if not matching.get("requires_attunement"):
+            return f"✨ «{matching.get('name')}» не требует настройки."
+        ok, reason = engine.add_attunement(ch, matching["name"])
+        return f"{'✅' if ok else '⚠'} {reason}"
+
+    async def unattune_item(self, db: AsyncSession, user: User, item_name: str) -> str:
+        ch = await self.ensure_character(db, user)
+        ok, reason = engine.remove_attunement(ch, item_name)
+        return f"{'✅' if ok else '⚠'} {reason}"
 
     async def perform_rest(
         self, db: AsyncSession, user: User, kind: str,

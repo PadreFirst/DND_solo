@@ -126,7 +126,8 @@ async def on_menu(cb: CallbackQuery) -> None:
 async def on_menu_back(cb: CallbackQuery, game: GameService, db: AsyncSession) -> None:
     user = await game.get_or_create_user(db, cb.from_user.id, cb.from_user.username)
     gs = await game.ensure_session(db, user)
-    options = json.loads(gs.last_options_json or "[]")
+    raw = json.loads(gs.last_options_json or "[]")
+    options = raw if isinstance(raw, list) else []
     try:
         await cb.message.edit_reply_markup(reply_markup=options_keyboard(options))
     except Exception:
@@ -405,6 +406,208 @@ async def on_menu_craft(cb: CallbackQuery, game: GameService, db: AsyncSession) 
     await cb.message.answer(game.format_recipes(ch), parse_mode="HTML")
 
 
+@router.message(Command("carry"))
+async def cmd_carry(message: Message, game: GameService, db: AsyncSession) -> None:
+    user = await game.get_or_create_user(db, message.from_user.id, message.from_user.username)
+    ch = await game.ensure_character(db, user)
+    await message.answer(game.format_carry(ch), parse_mode="HTML")
+
+
+@router.callback_query(F.data == "menu:carry")
+async def on_menu_carry(cb: CallbackQuery, game: GameService, db: AsyncSession) -> None:
+    await cb.answer()
+    user = await game.get_or_create_user(db, cb.from_user.id, cb.from_user.username)
+    ch = await game.ensure_character(db, user)
+    await cb.message.answer(game.format_carry(ch), parse_mode="HTML")
+
+
+@router.message(Command("attunement"))
+async def cmd_attunement(message: Message, game: GameService, db: AsyncSession) -> None:
+    user = await game.get_or_create_user(db, message.from_user.id, message.from_user.username)
+    ch = await game.ensure_character(db, user)
+    await message.answer(game.format_attunement(ch), parse_mode="HTML")
+
+
+@router.callback_query(F.data == "menu:attunement")
+async def on_menu_attunement(cb: CallbackQuery, game: GameService, db: AsyncSession) -> None:
+    await cb.answer()
+    user = await game.get_or_create_user(db, cb.from_user.id, cb.from_user.username)
+    ch = await game.ensure_character(db, user)
+    await cb.message.answer(game.format_attunement(ch), parse_mode="HTML")
+
+
+@router.message(Command("attune"))
+async def cmd_attune(message: Message, game: GameService, db: AsyncSession) -> None:
+    args = (message.text or "").partition(" ")[2].strip()
+    if not args:
+        await message.answer("Использование: <code>/attune &lt;предмет&gt;</code>", parse_mode="HTML")
+        return
+    user = await game.get_or_create_user(db, message.from_user.id, message.from_user.username)
+    await message.answer(await game.attune_item(db, user, args), parse_mode="HTML")
+
+
+@router.message(Command("unattune"))
+async def cmd_unattune(message: Message, game: GameService, db: AsyncSession) -> None:
+    args = (message.text or "").partition(" ")[2].strip()
+    if not args:
+        await message.answer("Использование: <code>/unattune &lt;предмет&gt;</code>", parse_mode="HTML")
+        return
+    user = await game.get_or_create_user(db, message.from_user.id, message.from_user.username)
+    await message.answer(await game.unattune_item(db, user, args), parse_mode="HTML")
+
+
+# ── Guided onboarding wizard ─────────────────────────────────────────
+#
+# Kept simple: a small 3-step wizard backed by the user's existing
+# GameSession.last_options_json as transient state storage. We avoid
+# importing aiogram.fsm to stay drop-in compatible with the current
+# middleware. Steps: universe → style → concept text → initialize_story.
+
+_UNIVERSES = [
+    ("fantasy", "🏰 Фэнтези"),
+    ("cyberpunk", "🌆 Киберпанк"),
+    ("postapoc", "☢ Постапокалипсис"),
+    ("space", "🚀 Космоопера"),
+    ("horror", "👻 Хоррор"),
+    ("noir", "🕵 Нуар-детектив"),
+]
+_STYLES = [
+    ("serious", "Серьёзный"),
+    ("dark", "Мрачный"),
+    ("humor", "С юмором"),
+    ("epic", "Эпический"),
+    ("gritty", "Жёсткий"),
+]
+
+
+def _onboarding_kb_universes():
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    rows = []
+    for i in range(0, len(_UNIVERSES), 2):
+        row = _UNIVERSES[i:i + 2]
+        rows.append([
+            InlineKeyboardButton(text=label, callback_data=f"onb:uni:{key}")
+            for key, label in row
+        ])
+    rows.append([InlineKeyboardButton(text="❌ Отмена", callback_data="onb:cancel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _onboarding_kb_styles(universe_key: str):
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    rows = []
+    for i in range(0, len(_STYLES), 2):
+        row = _STYLES[i:i + 2]
+        rows.append([
+            InlineKeyboardButton(text=label, callback_data=f"onb:sty:{universe_key}:{key}")
+            for key, label in row
+        ])
+    rows.append([InlineKeyboardButton(text="⬅ Назад", callback_data="onb:restart")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.message(Command("onboarding"))
+async def cmd_onboarding(message: Message) -> None:
+    await message.answer(
+        "🎲 <b>Визард новой игры</b> — шаг 1 из 3\n\n"
+        "Выбери вселенную:",
+        reply_markup=_onboarding_kb_universes(),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data == "menu:onboarding")
+async def on_menu_onboarding(cb: CallbackQuery) -> None:
+    await cb.answer()
+    await cb.message.answer(
+        "🎲 <b>Визард новой игры</b> — шаг 1 из 3\n\nВыбери вселенную:",
+        reply_markup=_onboarding_kb_universes(),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data == "onb:restart")
+async def on_onboarding_restart(cb: CallbackQuery) -> None:
+    await cb.answer()
+    try:
+        await cb.message.edit_text(
+            "🎲 <b>Визард новой игры</b> — шаг 1 из 3\n\nВыбери вселенную:",
+            reply_markup=_onboarding_kb_universes(),
+            parse_mode="HTML",
+        )
+    except Exception:
+        await cb.message.answer(
+            "🎲 <b>Визард новой игры</b> — шаг 1 из 3\n\nВыбери вселенную:",
+            reply_markup=_onboarding_kb_universes(),
+            parse_mode="HTML",
+        )
+
+
+@router.callback_query(F.data == "onb:cancel")
+async def on_onboarding_cancel(cb: CallbackQuery) -> None:
+    await cb.answer("Отменено.")
+    try:
+        await cb.message.edit_text("Визард отменён. Можешь описать героя одним сообщением или снова /onboarding.")
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data.startswith("onb:uni:"))
+async def on_onboarding_universe(cb: CallbackQuery) -> None:
+    await cb.answer()
+    key = cb.data.split(":")[-1]
+    label = next((lbl for k, lbl in _UNIVERSES if k == key), key)
+    try:
+        await cb.message.edit_text(
+            f"🎲 <b>Визард</b> — шаг 2 из 3\n\n"
+            f"Вселенная: <b>{label}</b>\n\nТеперь выбери стиль повествования:",
+            reply_markup=_onboarding_kb_styles(key),
+            parse_mode="HTML",
+        )
+    except Exception:
+        await cb.message.answer(
+            f"🎲 <b>Визард</b> — шаг 2 из 3\n\nВселенная: <b>{label}</b>\nСтиль:",
+            reply_markup=_onboarding_kb_styles(key),
+            parse_mode="HTML",
+        )
+
+
+@router.callback_query(F.data.startswith("onb:sty:"))
+async def on_onboarding_style(
+    cb: CallbackQuery, game: GameService, db: AsyncSession,
+) -> None:
+    _, _, uni_key, sty_key = cb.data.split(":")
+    uni_label = next((lbl for k, lbl in _UNIVERSES if k == uni_key), uni_key)
+    sty_label = next((lbl for k, lbl in _STYLES if k == sty_key), sty_key)
+
+    user = await game.get_or_create_user(db, cb.from_user.id, cb.from_user.username)
+    gs = await game.ensure_session(db, user)
+    # Stash wizard answers in a dedicated column so they don't collide with
+    # player-facing option lists. Cleared by `on_text` right after the
+    # player sends their character concept.
+    gs.onboarding_state_json = json.dumps({
+        "universe": uni_label, "universe_key": uni_key,
+        "style": sty_label, "style_key": sty_key,
+    }, ensure_ascii=False)
+    gs.turn_number = 0  # force initialize_story on the next text
+    gs.last_options_json = "[]"
+
+    await cb.answer()
+    try:
+        await cb.message.edit_text(
+            f"🎲 <b>Визард</b> — шаг 3 из 3\n\n"
+            f"Вселенная: <b>{uni_label}</b>\n"
+            f"Стиль: <b>{sty_label}</b>\n\n"
+            f"Теперь опиши персонажа <b>одним сообщением</b>: кто он, чем занимается, что его ведёт.\n"
+            f"Примеры:\n"
+            f" • <i>«Нетраннер-соло, ищет пропавшую сестру»</i>\n"
+            f" • <i>«Бывший паладин, отрёкшийся от ордена»</i>",
+            parse_mode="HTML",
+        )
+    except Exception:
+        await cb.message.answer("Теперь опиши персонажа одним сообщением.", parse_mode="HTML")
+
+
 @router.message(Command("help"))
 async def cmd_help(message: Message) -> None:
     await message.answer(
@@ -418,8 +621,13 @@ async def cmd_help(message: Message) -> None:
         "/sell &lt;item&gt; [qty] — продать\n"
         "/craft [рецепт] — список или крафт\n"
         "/combat — статус боя (раунд, инициатива)\n"
+        "/carry — нагрузка и грузоподъёмность\n"
+        "/attunement — настроенные предметы\n"
+        "/attune &lt;item&gt; — настроиться на предмет\n"
+        "/unattune &lt;item&gt; — снять настройку\n"
         "/hint — подсказка GM\n"
         "/rest — короткий или длинный отдых\n"
+        "/onboarding — визард новой игры\n"
         "/new — новая игра (очищает сцену)\n\n"
         "В любой момент можно задать вопрос GM: напиши <code>ГМ: ...</code>.\n"
         "Пример: <i>«ГМ: что такое преимущество?»</i>",
@@ -434,8 +642,25 @@ async def on_text(message: Message, game: GameService, db: AsyncSession) -> None
     text = message.text.strip()
 
     if gs.turn_number == 0:
+        # If the guided wizard was used, onboarding_state_json holds the
+        # universe + style choices. Prepend them to the concept so
+        # `initialize_story` and the LLM see the intended setting.
+        concept = text
+        onb_raw = (gs.onboarding_state_json or "").strip()
+        if onb_raw:
+            try:
+                onb = json.loads(onb_raw)
+            except Exception:
+                onb = {}
+            if isinstance(onb, dict) and onb:
+                concept = (
+                    f"Вселенная: {onb.get('universe', '')}. "
+                    f"Стиль: {onb.get('style', '')}. "
+                    f"Персонаж: {text}"
+                )
+            gs.onboarding_state_json = ""
         async with typing_status(message.bot, message.chat.id):
-            out = await game.initialize_story(db, user, text)
+            out = await game.initialize_story(db, user, concept)
         await message.answer(
             _compose_turn_message(out.text, out.options),
             reply_markup=options_keyboard(out.options),

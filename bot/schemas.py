@@ -16,6 +16,11 @@ class RollRequest(BaseModel):
     damage_dice: str = ""
     damage_type: str = ""  # slashing|piercing|fire|cold|lightning|poison|...
     target: str = ""
+    # Social rolls: name the NPC's faction so the engine can look up the
+    # player's current reputation and apply a bonus/penalty. If the NPC has
+    # no faction, leave empty.
+    faction: str = ""
+    npc_name: str = ""
 
 
 class EnemyAction(BaseModel):
@@ -40,6 +45,8 @@ class InventoryChange(BaseModel):
     damage_dice: str = ""
     emoji: str = ""
     item_type: str = ""  # weapon|armor|consumable|misc|ranged|...
+    weight_kg: float = 0.0
+    requires_attunement: bool = False
 
 
 class SceneEnemy(BaseModel):
@@ -63,6 +70,8 @@ class StartingItem(BaseModel):
     quantity: int = 1
     is_equipped: bool = False
     damage_dice: str = ""
+    weight_kg: float = 0.0
+    requires_attunement: bool = False
 
 
 class TradeItem(BaseModel):
@@ -153,3 +162,9 @@ class TurnPlan(BaseModel):
     # Crafting: LLM hands the player a blueprint. Stored in
     # Character.known_recipes_json on the spot so /craft can see it.
     grant_recipe: Recipe | None = None
+    # Passive perception: when set, the engine auto-checks 10+WIS+prof vs DC
+    # (no d20 roll) and reveals/hides scene details accordingly. Used for
+    # hidden clues, stealthed NPCs, traps the player didn't actively look
+    # for. Leave 0 to skip.
+    passive_perception_dc: int = 0
+    passive_perception_reveal: str = ""  # narrative hint shown ONLY on success

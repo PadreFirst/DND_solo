@@ -31,8 +31,11 @@ SIDE_PANEL_COMMANDS: list[BotCommand] = [
     BotCommand(command="sell", description="Продать предмет"),
     BotCommand(command="craft", description="Крафт / список рецептов"),
     BotCommand(command="combat", description="Статус боя"),
+    BotCommand(command="carry", description="Нагрузка и грузоподъёмность"),
+    BotCommand(command="attunement", description="Настроенные предметы"),
     BotCommand(command="hint", description="Подсказка GM"),
     BotCommand(command="rest", description="Отдых (короткий/длинный)"),
+    BotCommand(command="onboarding", description="Визард новой игры"),
     BotCommand(command="new", description="Новая игра"),
     BotCommand(command="help", description="Справка"),
 ]

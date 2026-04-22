@@ -30,6 +30,7 @@ async def init_db() -> None:
 _SOFT_MIGRATIONS: tuple[str, ...] = (
     "ALTER TABLE game_sessions ADD COLUMN scene_state_json TEXT DEFAULT '[]'",
     "ALTER TABLE game_sessions ADD COLUMN has_light_source BOOLEAN DEFAULT 1",
+    "ALTER TABLE game_sessions ADD COLUMN onboarding_state_json TEXT DEFAULT ''",
     "ALTER TABLE characters ADD COLUMN death_saves_success INTEGER DEFAULT 0",
     "ALTER TABLE characters ADD COLUMN death_saves_failure INTEGER DEFAULT 0",
     "ALTER TABLE characters ADD COLUMN resistances_json TEXT DEFAULT '{\"resist\":[],\"immune\":[],\"vulnerable\":[]}'",
