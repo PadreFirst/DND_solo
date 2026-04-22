@@ -1,104 +1,77 @@
-"""Entry point — starts the bot in polling mode with an embedded web server for the Mini App."""
 from __future__ import annotations
 
 import asyncio
 import logging
-import sys
 
-from aiohttp import web
+import uvicorn
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.types import BotCommand, MenuButtonCommands
+from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.config import settings
-from bot.db.engine import init_db
-from bot.handlers.game import router as game_router
-from bot.handlers.inventory import router as inventory_router
-from bot.handlers.start import router as start_router
-from bot.middlewares.db_session import DbSessionMiddleware
-from bot.web.server import create_app
+from bot.db import SessionLocal, init_db
+from bot.handlers import router
+from bot.services.game_service import GameService
+from bot.services.gemini import GeminiClient
+from bot.web import create_app
 
 
-def setup_logging() -> None:
-    level = logging.DEBUG if settings.debug else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
-        stream=sys.stdout,
-    )
-    logging.getLogger("aiogram").setLevel(logging.WARNING)
-    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
-    logging.getLogger("aiosqlite").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
-    logging.getLogger("httpx").setLevel(logging.INFO)
-    logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
+logging.basicConfig(
+    level=logging.DEBUG if settings.debug else logging.INFO,
+    format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
+)
+log = logging.getLogger(__name__)
 
 
-async def set_bot_commands(bot: Bot) -> None:
-    commands = [
-        BotCommand(command="start", description="New adventure / Новое приключение"),
-        BotCommand(command="stats", description="Character sheet / Карточка персонажа"),
-        BotCommand(command="inventory", description="Inventory / Инвентарь"),
-        BotCommand(command="quest", description="Current quest / Текущее задание"),
-        BotCommand(command="help", description="Help / Справка"),
-    ]
-    await bot.set_my_commands(commands)
-    await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+async def _db_middleware(handler, event, data):
+    async with SessionLocal() as session:
+        data["db"] = session
+        try:
+            result = await handler(event, data)
+            await session.commit()
+            return result
+        except Exception:
+            await session.rollback()
+            raise
 
 
-_shutdown_event = asyncio.Event()
-
-
-async def _run_web_server() -> None:
-    log = logging.getLogger(__name__)
-    app = create_app()
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", settings.webapp_port)
-    await site.start()
-    log.info("Web server started on 0.0.0.0:%d", settings.webapp_port)
-    try:
-        await _shutdown_event.wait()
-    finally:
-        await runner.cleanup()
-
-
-async def main() -> None:
-    setup_logging()
-    log = logging.getLogger(__name__)
-
-    log.info("Initializing database...")
+async def run() -> None:
     await init_db()
+    gemini = GeminiClient()
+    game = GameService(gemini)
 
     bot = Bot(
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
+    dp = Dispatcher(storage=MemoryStorage())
+    dp.update.middleware.register(_db_middleware)
+    dp["game"] = game
+    dp.include_router(router)
 
-    await set_bot_commands(bot)
+    app = create_app(game)
+    config = uvicorn.Config(app, host=settings.web_host, port=settings.web_port, log_level="info")
+    server = uvicorn.Server(config)
 
-    dp = Dispatcher()
-
-    dp.message.middleware(DbSessionMiddleware())
-    dp.callback_query.middleware(DbSessionMiddleware())
-
-    dp.include_router(start_router)
-    dp.include_router(inventory_router)
-    dp.include_router(game_router)
-
-    log.info("Bot starting in polling mode + web server on port %d...", settings.webapp_port)
-    web_task = asyncio.create_task(_run_web_server())
-    try:
-        await dp.start_polling(bot)
-    finally:
-        _shutdown_event.set()
-        web_task.cancel()
+    async def _run_web() -> None:
         try:
-            await web_task
-        except asyncio.CancelledError:
-            pass
+            await server.serve()
+        except SystemExit as exc:
+            # Uvicorn may raise SystemExit on bind errors (e.g. port already in use).
+            # Keep Telegram polling alive instead of stopping the whole bot.
+            log.error("Web server failed to start, continuing bot-only mode: %s", exc)
+
+    async def _run_bot():
+        await dp.start_polling(bot)
+
+    log.info("Starting Telegram bot + API server")
+    try:
+        await asyncio.gather(_run_web(), _run_bot())
+    finally:
+        await gemini.close()
+        await bot.session.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(run())
