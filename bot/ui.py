@@ -17,15 +17,27 @@ def options_keyboard(options: list[str]) -> InlineKeyboardMarkup:
 
 
 def menu_keyboard(web_app_url: str | None = None) -> InlineKeyboardMarkup:
-    first_row: list[InlineKeyboardButton]
+    """Inline menu — must mirror SIDE_PANEL_COMMANDS in bot/main.py.
+
+    Rule of thumb: whatever is in the "/" slash-popup MUST also be here, and
+    vice-versa. Otherwise players see two different menus and get confused.
+    """
     if web_app_url:
-        first_row = [InlineKeyboardButton(text="👤 Мой персонаж (мини-апп)", web_app=WebAppInfo(url=web_app_url))]
+        character_row = [InlineKeyboardButton(text="👤 Мой персонаж (мини-апп)", web_app=WebAppInfo(url=web_app_url))]
     else:
-        first_row = [InlineKeyboardButton(text="👤 Мой персонаж (мини-апп)", callback_data="menu:character")]
+        character_row = [InlineKeyboardButton(text="👤 Мой персонаж (мини-апп)", callback_data="menu:character")]
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            first_row,
-            [InlineKeyboardButton(text="💡 Подсказка", callback_data="menu:hint")],
+            character_row,
+            [
+                InlineKeyboardButton(text="📊 Карточка", callback_data="menu:stats"),
+                InlineKeyboardButton(text="🎒 Инвентарь", callback_data="menu:inventory"),
+            ],
+            [
+                InlineKeyboardButton(text="📋 Квест", callback_data="menu:quest"),
+                InlineKeyboardButton(text="💡 Подсказка", callback_data="menu:hint"),
+            ],
+            [InlineKeyboardButton(text="🌙 Отдых", callback_data="menu:rest")],
             [InlineKeyboardButton(text="🔄 Новая игра", callback_data="menu:new")],
             [InlineKeyboardButton(text="⬅ Назад", callback_data="menu:back")],
         ]

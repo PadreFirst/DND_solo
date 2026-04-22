@@ -8,6 +8,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import BotCommand
 
 from bot.config import settings
 from bot.db import SessionLocal, init_db
@@ -15,6 +16,21 @@ from bot.handlers import router
 from bot.services.game_service import GameService
 from bot.services.gemini import GeminiClient
 from bot.web import create_app
+
+
+# Side-panel commands must mirror the inline menu — otherwise players see two
+# different "menus" (one by "/" slash-popup, one by the Меню button) and get
+# confused. These are the canonical commands.
+SIDE_PANEL_COMMANDS: list[BotCommand] = [
+    BotCommand(command="start", description="Продолжить или начать"),
+    BotCommand(command="stats", description="Карточка персонажа"),
+    BotCommand(command="inventory", description="Инвентарь"),
+    BotCommand(command="quest", description="Активный квест"),
+    BotCommand(command="hint", description="Подсказка GM"),
+    BotCommand(command="rest", description="Отдых (короткий/длинный)"),
+    BotCommand(command="new", description="Новая игра"),
+    BotCommand(command="help", description="Справка"),
+]
 
 
 logging.basicConfig(
@@ -49,6 +65,13 @@ async def run() -> None:
     dp.update.middleware.register(_db_middleware)
     dp["game"] = game
     dp.include_router(router)
+
+    try:
+        await bot.set_my_commands(SIDE_PANEL_COMMANDS)
+    except Exception:
+        # Not fatal — bot still works, just without the slash popup being in
+        # sync. Log but never block startup on BotFather quirks.
+        log.exception("Failed to set bot commands")
 
     app = create_app(game)
     config = uvicorn.Config(app, host=settings.web_host, port=settings.web_port, log_level="info")

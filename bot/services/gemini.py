@@ -14,21 +14,66 @@ log = logging.getLogger(__name__)
 SYSTEM_PROMPT = (ROOT_DIR / "system_prompt.md").read_text(encoding="utf-8")
 
 _FORMAT_HINT = (
-    "Верни ТОЛЬКО JSON с полями TurnPlan:\n"
+    "Верни ТОЛЬКО JSON (никакого markdown/текста вокруг) со схемой TurnPlan:\n"
     "{\n"
-    '  "narrative": "...",\n'
+    '  "narrative": "3-6 предложений, БЕЗ чисел бросков и HP — их сформирует код",\n'
     '  "gm_question_mode": false,\n'
     '  "gm_answer": "",\n'
-    '  "rolls": [{"type":"skill|attack|save","label":"...","ability":"STR|DEX|CON|INT|WIS|CHA","dc":12,"advantage":false,"disadvantage":false}],\n'
-    '  "enemy_actions": [{"name":"...","attack_bonus":4,"damage_dice":"1d6","reason":"..."}],\n'
+    '  "rolls": [\n'
+    "    // Если игрок атакует, ОБЯЗАТЕЛЬНО заполни damage_dice и target.\n"
+    "    // damage_dice — формула кости оружия (например '1d8','2d6','1d10+2').\n"
+    "    // target — имя врага из scene_enemies, по кому стреляют.\n"
+    '    {"type":"skill|attack|save","label":"...","ability":"STR|DEX|CON|INT|WIS|CHA","dc":12,\n'
+    '     "advantage":false,"disadvantage":false,"damage_dice":"1d8",\n'
+    '     "damage_type":"slashing|piercing|bludgeoning|fire|cold|lightning|poison|radiant|necrotic|psychic|thunder|acid|force",\n'
+    '     "target":"Оперативник 1"}\n'
+    "  ],\n"
+    '  "enemy_actions": [{"name":"...","attack_bonus":4,"damage_dice":"1d6","damage_type":"piercing","reason":"..."}],\n'
     '  "direct_hp_change": 0,\n'
-    '  "inventory_changes": [{"action":"add|remove|use","name":"...","quantity":1}],\n'
+    "  // При добавлении оружия ВСЕГДА заполняй damage_dice и item_type=weapon|ranged.\n"
+    '  "inventory_changes": [\n'
+    '    {"action":"add|remove|use","name":"...","quantity":1,"damage_dice":"1d10","emoji":"🔫","item_type":"ranged"}\n'
+    "  ],\n"
     '  "location_name": "",\n'
     '  "location_description": "",\n'
     '  "quest_update": "",\n'
     '  "xp_award": 0,\n'
     '  "reputation_change": [{"faction":"...","value":10}],\n'
-    '  "options": ["...","...","...","...","✏ Написать свой вариант"]\n'
+    '  "options": ["...","...","...","...","✏ Написать свой вариант"],\n'
+    "  // combat_active=true + scene_enemies=[] → конец боя. Бой вне сцены — combat_active=false.\n"
+    '  "combat_active": false,\n'
+    '  "scene_enemies": [\n'
+    '    {"name":"Оперативник 1","hp_current":15,"hp_max":15,"ac":13,"notes":"укрытие за баком"}\n'
+    "  ]\n"
+    "}\n"
+    "ПРАВИЛА:\n"
+    "- НИКОГДА не пиши цифры бросков/урона/HP в narrative. Эти блоки собирает код и вставляет ДО нарратива.\n"
+    "- Если идёт бой — scene_enemies должен отражать ВСЕХ живых врагов с их HP/КД.\n"
+    "- Атака игрока без damage_dice и target — считается невалидной: всегда заполняй оба поля.\n"
+    "- damage_type влияет на resist/immune/vulnerable — указывай тип под оружие/заклинание.\n"
+    "- Если игрок Blinded/Poisoned/Prone/Restrained/Frightened — НЕ проставляй disadvantage сам, код сделает автоматически.\n"
+    "- Погода/темнота тоже применяется кодом. Не дублируй их в advantage/disadvantage.\n"
+)
+
+_OPENING_FORMAT_HINT = (
+    "Кроме обычных полей TurnPlan, в СТАРТОВОМ ходе ОБЯЗАТЕЛЬНО заполни character_setup:\n"
+    "{\n"
+    '  "character_setup": {\n'
+    '    "name": "...",            // имя персонажа\n'
+    '    "race": "...",            // раса/вид — под сеттинг (в киберпанке нет эльфов!)\n'
+    '    "char_class": "...",      // класс/архетип — под сеттинг (в кибере: нетраннер, солдат, соло)\n'
+    '    "universe": "...",        // короткое название сеттинга\n'
+    '    "narrative_style": "...", // серьёзно|мрачно|с юмором|нуар|...\n'
+    '    "abilities": {"STR":14,"DEX":12,"CON":13,"INT":10,"WIS":10,"CHA":8},\n'
+    '    "skill_proficiencies": ["скрытность","внимательность"],\n'
+    '    "saving_throw_proficiencies": ["DEX","CON"],\n'
+    '    "starting_inventory": [\n'
+    "      // Экипировка должна быть АДЕКВАТНА сеттингу:\n"
+    "      // киберпанк → пистолет/дробовик/имплант/инфочип/стимпак, НЕ меч/броня/зелье\n"
+    "      // fantasy    → меч/лук/кольчуга/зелье лечения\n"
+    '      {"name":"Тяжёлый пистолет","emoji":"🔫","item_type":"ranged","is_equipped":true,"damage_dice":"1d10"}\n'
+    "    ]\n"
+    "  }\n"
     "}\n"
 )
 
@@ -124,6 +169,38 @@ class GeminiClient:
                 log.warning("Gemini turn plan retry %s: %s", attempt + 1, e)
         raise RuntimeError(f"Failed to generate turn plan: {last_error}")
 
+    # ── Adventure summary (cheap flash model, runs every 10 turns) ────
+
+    async def summarize_adventure(self, *, prior: str, transcript: str) -> str:
+        """Fold the latest transcript into a rolling one-paragraph summary.
+
+        Keeps the Player State alive across the 20-message sliding window so
+        the LLM doesn't "forget" NPC names / quest promises made 30 turns ago.
+        """
+        prompt = (
+            "Ты — Game Master. Обнови КРАТКОЕ саммари приключения (4–8 предложений), "
+            "чтобы сохранить важный контекст для следующих ходов: ключевые NPC, "
+            "данные обещания, договорённости, квесты, смены локаций.\n\n"
+            f"ПРЕДЫДУЩЕЕ САММАРИ (может быть пустым):\n{prior or '(пусто)'}\n\n"
+            f"ПОСЛЕДНИЕ СООБЩЕНИЯ:\n{transcript}\n\n"
+            "Верни ТОЛЬКО JSON вида {\"summary\": \"...\"} без markdown."
+        )
+        data = await self._call(
+            prompt=prompt,
+            model=settings.gemini_model,
+            temperature=0.3,
+            max_tokens=800,
+            response_mime_type="application/json",
+        )
+        text = self._extract_text(data).strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        try:
+            raw = json.loads(text)
+        except Exception:
+            return ""
+        return (raw.get("summary") or "").strip()
+
     # ── World opening (uses heavy/pro model for quality) ──────────────
 
     async def generate_world_opening(self, context: str, concept: str) -> TurnPlan:
@@ -140,7 +217,9 @@ class GeminiClient:
             "- Заполни quest_update с кратким описанием основного квеста\n"
             "- Варианты действий (options) должны быть КОНКРЕТНЫМИ для этой сцены, "
             "разными по подходу (не 4 способа осмотреться), без спойлера результата\n\n"
-            f"{_FORMAT_HINT}"
+            "- ВНИМАНИЕ: экипировка, раса и класс персонажа ДОЛЖНЫ соответствовать сеттингу. "
+            "Никаких мечей и эльфов в киберпанке. Никаких пистолетов в средневековом фэнтези.\n\n"
+            f"{_FORMAT_HINT}\n{_OPENING_FORMAT_HINT}"
         )
         last_error: Exception | None = None
         for attempt in range(3):

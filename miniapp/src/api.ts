@@ -5,15 +5,30 @@ function resolveUserId(): number | null {
   const fromQuery = qp.get("user_id");
   if (fromQuery) {
     const n = Number(fromQuery);
-    if (Number.isFinite(n) && n > 0) {
-      return n;
-    }
+    if (Number.isFinite(n) && n > 0) return n;
   }
 
   const tg = (window as any).Telegram?.WebApp;
-  const fromTelegram = tg?.initDataUnsafe?.user?.id;
-  if (typeof fromTelegram === "number" && fromTelegram > 0) {
-    return fromTelegram;
+  const fromUnsafe = tg?.initDataUnsafe?.user?.id;
+  if (typeof fromUnsafe === "number" && fromUnsafe > 0) return fromUnsafe;
+
+  // Fallback: parse signed initData (url-encoded) manually. Occasionally the
+  // Mini App is opened before the Telegram JS finishes populating
+  // initDataUnsafe — but initData itself is already filled by the launcher.
+  const rawInit: string | undefined = tg?.initData;
+  if (rawInit && typeof rawInit === "string") {
+    try {
+      const params = new URLSearchParams(rawInit);
+      const userBlob = params.get("user");
+      if (userBlob) {
+        const parsed = JSON.parse(userBlob);
+        if (parsed && typeof parsed.id === "number" && parsed.id > 0) {
+          return parsed.id;
+        }
+      }
+    } catch {
+      // ignore — will fall through to null and surface a user-visible error
+    }
   }
   return null;
 }

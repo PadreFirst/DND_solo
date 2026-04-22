@@ -58,6 +58,19 @@ class Character(Base):
     attunement_json: Mapped[str] = mapped_column(Text, default='{"max":3,"items":[]}')
     rest_status_json: Mapped[str] = mapped_column(Text, default='{"short_rest_used":false,"long_rest_available":true}')
 
+    # Death saves tracker — code rolls 1d20 at the start of every turn while
+    # HP=0 and not stabilized/dead. Stored here so it survives between turns.
+    death_saves_success: Mapped[int] = mapped_column(Integer, default=0)
+    death_saves_failure: Mapped[int] = mapped_column(Integer, default=0)
+
+    # {"resist":["fire"],"immune":["poison"],"vulnerable":["cold"]}
+    resistances_json: Mapped[str] = mapped_column(Text, default='{"resist":[],"immune":[],"vulnerable":[]}')
+
+    # Hit dice available for short rest (d8 per level for most classes).
+    # Stored as a plain integer — the die type is implied by class.
+    hit_dice_remaining: Mapped[int] = mapped_column(Integer, default=1)
+    hit_dice_max: Mapped[int] = mapped_column(Integer, default=1)
+
     user: Mapped[User] = relationship(back_populates="character")
 
     def ability_mod(self, ability_key: str) -> int:
@@ -92,6 +105,14 @@ class GameSession(Base):
 
     last_options_json: Mapped[str] = mapped_column(Text, default="[]")
     turn_number: Mapped[int] = mapped_column(Integer, default=0)
+    # Snapshot of enemies currently on the scene (see SceneEnemy schema).
+    # Kept as JSON so we can extend it later without another migration.
+    scene_state_json: Mapped[str] = mapped_column(Text, default="[]")
+
+    # Whether the current scene has an active light source (torch, implant,
+    # streetlight). Used by engine.compute_auto_modifiers to decide if "night"
+    # applies a disadvantage on Perception and ranged attacks.
+    has_light_source: Mapped[bool] = mapped_column(Boolean, default=True)
 
     user: Mapped[User] = relationship(back_populates="session")
 

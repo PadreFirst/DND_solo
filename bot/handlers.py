@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 
 from aiogram import F, Router
 from aiogram.enums import ChatAction
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -175,6 +175,143 @@ async def on_new_game(cb: CallbackQuery, game: GameService, db: AsyncSession) ->
     await cb.message.answer(
         "🔄 <b>Новая игра.</b>\n\nОпиши персонажа и сеттинг, чтобы начать кампанию.\n"
         "Пример: <i>«Полуэльф-рейнджер на границе диких земель»</i>",
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data == "menu:stats")
+async def on_menu_stats(cb: CallbackQuery, game: GameService, db: AsyncSession) -> None:
+    await cb.answer()
+    user = await game.get_or_create_user(db, cb.from_user.id, cb.from_user.username)
+    ch = await game.ensure_character(db, user)
+    await cb.message.answer(game.format_stats(ch), parse_mode="HTML")
+
+
+@router.callback_query(F.data == "menu:inventory")
+async def on_menu_inventory(cb: CallbackQuery, game: GameService, db: AsyncSession) -> None:
+    await cb.answer()
+    user = await game.get_or_create_user(db, cb.from_user.id, cb.from_user.username)
+    ch = await game.ensure_character(db, user)
+    await cb.message.answer(game.format_inventory_detailed(ch), parse_mode="HTML")
+
+
+@router.callback_query(F.data == "menu:quest")
+async def on_menu_quest(cb: CallbackQuery, game: GameService, db: AsyncSession) -> None:
+    await cb.answer()
+    user = await game.get_or_create_user(db, cb.from_user.id, cb.from_user.username)
+    gs = await game.ensure_session(db, user)
+    await cb.message.answer(await game.format_active_quest(db, user.id, gs), parse_mode="HTML")
+
+
+# ── Slash commands (side-panel) — MUST mirror the inline menu above ──
+
+@router.message(Command("stats"))
+async def cmd_stats(message: Message, game: GameService, db: AsyncSession) -> None:
+    user = await game.get_or_create_user(db, message.from_user.id, message.from_user.username)
+    ch = await game.ensure_character(db, user)
+    await message.answer(game.format_stats(ch), parse_mode="HTML")
+
+
+@router.message(Command("inventory"))
+async def cmd_inventory(message: Message, game: GameService, db: AsyncSession) -> None:
+    user = await game.get_or_create_user(db, message.from_user.id, message.from_user.username)
+    ch = await game.ensure_character(db, user)
+    await message.answer(game.format_inventory_detailed(ch), parse_mode="HTML")
+
+
+@router.message(Command("quest"))
+async def cmd_quest(message: Message, game: GameService, db: AsyncSession) -> None:
+    user = await game.get_or_create_user(db, message.from_user.id, message.from_user.username)
+    gs = await game.ensure_session(db, user)
+    await message.answer(await game.format_active_quest(db, user.id, gs), parse_mode="HTML")
+
+
+@router.message(Command("hint"))
+async def cmd_hint(message: Message) -> None:
+    await message.answer(
+        "💡 Подсказка: смотри на окружение и комбинируй подходы.\n"
+        "Используй не только бой: разговор, разведка, укрытие, предметы, отдых."
+    )
+
+
+@router.message(Command("new"))
+async def cmd_new(message: Message, game: GameService, db: AsyncSession) -> None:
+    user = await game.get_or_create_user(db, message.from_user.id, message.from_user.username)
+    gs = await game.ensure_session(db, user)
+    gs.turn_number = 0
+    gs.combat_active = False
+    gs.round_number = 0
+    gs.current_location = "Неизвестная локация"
+    gs.current_location_description = ""
+    gs.active_quest_summary = ""
+    gs.last_options_json = "[]"
+    gs.scene_state_json = "[]"
+    await message.answer(
+        "🔄 <b>Новая игра.</b>\n\nОпиши персонажа и сеттинг одним сообщением.\n"
+        "Пример: <i>«Нетраннер-соло в Найт-Сити, ищет сестру»</i>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command("rest"))
+async def cmd_rest(message: Message) -> None:
+    await message.answer(
+        "🌙 <b>Отдых</b>\n\n"
+        "Короткий (~1 час): тратишь 1 кость хитов, восстанавливаешь HP.\n"
+        "Длинный (~8 часов): полное восстановление HP, ячейки, снимаются состояния.\n\n"
+        "Выбери тип:",
+        reply_markup=_rest_keyboard(),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data == "menu:rest")
+async def on_menu_rest(cb: CallbackQuery) -> None:
+    await cb.answer()
+    await cb.message.answer(
+        "🌙 <b>Отдых</b>\n\nВыбери тип:",
+        reply_markup=_rest_keyboard(),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data.startswith("rest:"))
+async def on_rest(cb: CallbackQuery, game: GameService, db: AsyncSession) -> None:
+    kind = cb.data.split(":", 1)[1]
+    if kind not in {"short", "long"}:
+        await cb.answer("Неизвестный тип отдыха.", show_alert=True)
+        return
+    user = await game.get_or_create_user(db, cb.from_user.id, cb.from_user.username)
+    out = await game.perform_rest(db, user, kind)
+    await cb.answer()
+    await cb.message.answer(
+        _compose_turn_message(out.text, out.options),
+        reply_markup=options_keyboard(out.options),
+        parse_mode="HTML",
+    )
+
+
+def _rest_keyboard():
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🕒 Короткий отдых", callback_data="rest:short")],
+        [InlineKeyboardButton(text="🌙 Длинный отдых", callback_data="rest:long")],
+    ])
+
+
+@router.message(Command("help"))
+async def cmd_help(message: Message) -> None:
+    await message.answer(
+        "ℹ <b>Справка</b>\n\n"
+        "/start — продолжить или начать заново\n"
+        "/stats — карточка персонажа\n"
+        "/inventory — инвентарь с формулами урона\n"
+        "/quest — активные квесты\n"
+        "/hint — подсказка GM\n"
+        "/rest — короткий или длинный отдых\n"
+        "/new — новая игра (очищает сцену)\n\n"
+        "В любой момент можно задать вопрос GM: напиши <code>ГМ: ...</code>.\n"
+        "Пример: <i>«ГМ: что такое преимущество?»</i>",
         parse_mode="HTML",
     )
 

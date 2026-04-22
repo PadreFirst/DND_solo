@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import random
+import re
 from dataclasses import dataclass, field
 
-from bot.models import Character
+from bot.models import Character, GameSession
 from bot.services.dice import RollResult, roll_dice
 
 SKILL_TO_ABILITY = {
@@ -33,6 +34,101 @@ ABILITY_RU = {
     "INT": "Инт", "WIS": "Мдр", "CHA": "Хар",
 }
 
+# Conditions that impose disadvantage on the character's OWN rolls. Mapped to
+# the roll kind they affect. This is the "code enforces what the TZ promised".
+# Source: system_prompt.md → Conditions table.
+_COND_DISADV_ATTACK = {"poisoned", "blinded", "prone", "restrained", "frightened"}
+_COND_DISADV_CHECK = {"poisoned", "frightened"}
+_COND_DISADV_DEX_SAVE = {"restrained"}
+_COND_INCAPACITATED = {"incapacitated", "stunned", "paralyzed", "unconscious", "petrified"}
+
+# Weather/light impact. Kept intentionally shallow — full DM-grade tactical
+# modifiers would need scene topology that we don't track yet.
+_WEATHER_DISADV_RANGED = {"fog", "storm", "rain", "snow"}
+
+_RANGED_HINTS = (
+    "пистолет", "винтовк", "лук", "арбалет", "дротик", "мет", "снайпер",
+    "револьвер", "дробовик", "стрел", "дальн", "ranged",
+)
+_PERCEPTION_HINTS = ("вниматель", "восприят", "perception", "слух")
+
+
+def _norm_cond_set(raw: str | None) -> set[str]:
+    """Turn character.conditions_json into a lowercase set of condition names."""
+    try:
+        data = json.loads(raw or "[]")
+    except Exception:
+        return set()
+    out: set[str] = set()
+    for item in data:
+        if isinstance(item, str):
+            out.add(item.strip().lower())
+        elif isinstance(item, dict):
+            name = item.get("name") or item.get("id") or ""
+            if name:
+                out.add(str(name).strip().lower())
+    return out
+
+
+def compute_auto_modifiers(
+    character: Character,
+    gs: GameSession | None,
+    *,
+    roll_kind: str,          # "attack" | "check" | "save"
+    label: str = "",
+    ability_key: str = "",
+) -> tuple[bool, bool, list[str]]:
+    """Compute automatic advantage/disadvantage from conditions + environment.
+
+    Returns (advantage, disadvantage, reasons). When both sides fire they
+    cancel out per D&D 5e (→ both False). `reasons` is a human-readable list
+    meant to be surfaced to the player as "почему помеха/преимущество".
+    """
+    adv_reasons: list[str] = []
+    dis_reasons: list[str] = []
+
+    label_low = (label or "").lower()
+    is_ranged = any(h in label_low for h in _RANGED_HINTS)
+    is_perception = any(h in label_low for h in _PERCEPTION_HINTS)
+
+    conds = _norm_cond_set(getattr(character, "conditions_json", None))
+    if roll_kind == "attack":
+        for bad in _COND_DISADV_ATTACK & conds:
+            dis_reasons.append(bad)
+        # Invisible → advantage on own attacks
+        if "invisible" in conds:
+            adv_reasons.append("invisible")
+    elif roll_kind == "check":
+        for bad in _COND_DISADV_CHECK & conds:
+            dis_reasons.append(bad)
+    elif roll_kind == "save":
+        if ability_key.upper() == "DEX" and (_COND_DISADV_DEX_SAVE & conds):
+            dis_reasons.append("restrained")
+
+    # Environment — only if we have a session to look at.
+    if gs is not None:
+        weather = (gs.weather or "").lower()
+        tod = (gs.time_of_day or "").lower()
+        no_light = not bool(getattr(gs, "has_light_source", True))
+
+        if roll_kind == "attack" and is_ranged:
+            if weather in _WEATHER_DISADV_RANGED:
+                dis_reasons.append(f"погода:{weather}")
+            if tod == "night" and no_light:
+                dis_reasons.append("темнота")
+        elif roll_kind == "check" and is_perception:
+            if weather in {"fog", "storm", "snow"}:
+                dis_reasons.append(f"погода:{weather}")
+            if tod == "night" and no_light:
+                dis_reasons.append("темнота")
+
+    adv = bool(adv_reasons)
+    dis = bool(dis_reasons)
+    # Cancel out per 5e rule.
+    if adv and dis:
+        return False, False, adv_reasons + dis_reasons
+    return adv, dis, adv_reasons + dis_reasons
+
 
 @dataclass
 class RichRoll:
@@ -48,6 +144,8 @@ class RichRoll:
     total: int
     dc: int
     success: bool
+    # Reasons for advantage/disadvantage/cancellation, e.g. ["poisoned","темнота"]
+    reasons: list[str] = field(default_factory=list)
 
     def format(self, *, kind: str = "Проверка") -> str:
         parts: list[str] = []
@@ -56,10 +154,8 @@ class RichRoll:
             tag = "преим." if self.advantage else "помеха"
             chosen = max(self.d20, self.d20_alt) if self.advantage else min(self.d20, self.d20_alt)
             parts.append(f"d20[{self.d20},{self.d20_alt}]→{chosen} ({tag})")
-            base_d20 = chosen
         else:
             parts.append(f"d20={self.d20}")
-            base_d20 = self.d20
 
         ab_short = ABILITY_RU.get(self.ability_key, self.ability_key)
         if self.ability_mod_value != 0:
@@ -75,7 +171,10 @@ class RichRoll:
         if kind == "Атака":
             result = "Попадание" if self.success else "Промах"
 
-        return f"🎲 {kind} {self.label}: {', '.join(parts)} → {self.total} vs {dc_label} {self.dc} — {result}"
+        out = f"🎲 {kind} {self.label}: {', '.join(parts)} → {self.total} vs {dc_label} {self.dc} — {result}"
+        if self.reasons:
+            out += f"  [{', '.join(self.reasons)}]"
+        return out
 
 
 def ability_mod(character: Character, key: str) -> int:
@@ -91,6 +190,7 @@ def make_skill_check(
     *,
     advantage: bool = False,
     disadvantage: bool = False,
+    gs: GameSession | None = None,
 ) -> RichRoll:
     key = SKILL_TO_ABILITY.get(skill_name.strip().lower(), "WIS")
     mod = ability_mod(character, key)
@@ -98,18 +198,26 @@ def make_skill_check(
     prof_bonus = character.proficiency_bonus if skill_name.strip().lower() in profs else 0
     total_mod = mod + prof_bonus
 
-    d20, d20_alt = _roll_d20(advantage, disadvantage)
-    chosen = _pick_d20(d20, d20_alt, advantage, disadvantage)
+    auto_adv, auto_dis, reasons = compute_auto_modifiers(
+        character, gs, roll_kind="check", label=skill_name, ability_key=key,
+    )
+    adv = advantage or auto_adv
+    dis = disadvantage or auto_dis
+    if adv and dis:
+        adv = dis = False
+
+    d20, d20_alt = _roll_d20(adv, dis)
+    chosen = _pick_d20(d20, d20_alt, adv, dis)
     total = chosen + total_mod
 
     return RichRoll(
         label=skill_name.capitalize(),
         d20=d20, d20_alt=d20_alt,
-        advantage=advantage and not disadvantage,
-        disadvantage=disadvantage and not advantage,
+        advantage=adv, disadvantage=dis,
         ability_key=key, ability_mod_value=mod,
         proficiency_value=prof_bonus,
         total=total, dc=dc, success=total >= dc,
+        reasons=reasons,
     )
 
 
@@ -121,22 +229,31 @@ def make_attack_roll(
     advantage: bool = False,
     disadvantage: bool = False,
     label: str = "атака",
+    gs: GameSession | None = None,
 ) -> RichRoll:
     mod = ability_mod(character, ability_key)
     prof_bonus = character.proficiency_bonus
 
-    d20, d20_alt = _roll_d20(advantage, disadvantage)
-    chosen = _pick_d20(d20, d20_alt, advantage, disadvantage)
+    auto_adv, auto_dis, reasons = compute_auto_modifiers(
+        character, gs, roll_kind="attack", label=label, ability_key=ability_key,
+    )
+    adv = advantage or auto_adv
+    dis = disadvantage or auto_dis
+    if adv and dis:
+        adv = dis = False
+
+    d20, d20_alt = _roll_d20(adv, dis)
+    chosen = _pick_d20(d20, d20_alt, adv, dis)
     total = chosen + mod + prof_bonus
 
     return RichRoll(
         label=label,
         d20=d20, d20_alt=d20_alt,
-        advantage=advantage and not disadvantage,
-        disadvantage=disadvantage and not advantage,
+        advantage=adv, disadvantage=dis,
         ability_key=ability_key, ability_mod_value=mod,
         proficiency_value=prof_bonus,
         total=total, dc=target_ac, success=total >= target_ac,
+        reasons=reasons,
     )
 
 
@@ -147,30 +264,111 @@ def make_save_roll(
     *,
     advantage: bool = False,
     disadvantage: bool = False,
+    gs: GameSession | None = None,
 ) -> RichRoll:
     mod = ability_mod(character, ability_key)
     save_profs = [s.upper() for s in json.loads(character.saving_throw_proficiencies_json or "[]")]
     prof_bonus = character.proficiency_bonus if ability_key.upper() in save_profs else 0
 
-    d20, d20_alt = _roll_d20(advantage, disadvantage)
-    chosen = _pick_d20(d20, d20_alt, advantage, disadvantage)
+    auto_adv, auto_dis, reasons = compute_auto_modifiers(
+        character, gs, roll_kind="save", label="", ability_key=ability_key,
+    )
+    adv = advantage or auto_adv
+    dis = disadvantage or auto_dis
+    if adv and dis:
+        adv = dis = False
+
+    d20, d20_alt = _roll_d20(adv, dis)
+    chosen = _pick_d20(d20, d20_alt, adv, dis)
     total = chosen + mod + prof_bonus
 
     ab_label = ABILITY_RU.get(ability_key.upper(), ability_key)
     return RichRoll(
         label=ab_label,
         d20=d20, d20_alt=d20_alt,
-        advantage=advantage and not disadvantage,
-        disadvantage=disadvantage and not advantage,
+        advantage=adv, disadvantage=dis,
         ability_key=ability_key, ability_mod_value=mod,
         proficiency_value=prof_bonus,
         total=total, dc=dc, success=total >= dc,
+        reasons=reasons,
     )
 
 
+def roll_damage(dice_expr: str, ability_mod_value: int = 0, *, critical: bool = False) -> tuple[int, str]:
+    """Roll a weapon damage expression like "1d8", "2d6+3", "1d10-1".
+
+    Returns (total, human-readable detail). When critical=True the number of
+    dice is doubled (but the flat modifier is NOT doubled — standard D&D 5e).
+    ability_mod_value is added on top ONLY when the expression doesn't
+    already carry its own modifier, so LLM-supplied strings with explicit
+    "+MOD" still work correctly.
+    """
+    expr = (dice_expr or "").strip()
+    if not expr:
+        return 0, ""
+
+    m = _DMG_RE.match(expr)
+    if not m:
+        # Unparseable — fall back to a flat roll via the dice service.
+        try:
+            r = roll_dice(expr)
+            return max(0, r.total), f"{expr} → {r.total}"
+        except Exception:
+            return 0, expr
+
+    count = int(m.group(1))
+    sides = int(m.group(2))
+    flat = int((m.group(3) or "0").replace(" ", ""))
+    has_explicit_mod = bool(m.group(3))
+
+    actual_count = count * 2 if critical else count
+    rolls = [random.randint(1, sides) for _ in range(actual_count)]
+    dice_total = sum(rolls)
+
+    mod_part = flat if has_explicit_mod else ability_mod_value
+    total = max(0, dice_total + mod_part)
+
+    bits = [f"{actual_count}d{sides}{rolls}"]
+    if mod_part:
+        bits.append(f"{mod_part:+d}")
+    if critical:
+        bits.append("(крит ×2 кости)")
+    return total, " ".join(bits) + f" → {total}"
+
+
+_DMG_RE = re.compile(r"^\s*(\d+)d(\d+)\s*([+-]\s*\d+)?\s*$", re.IGNORECASE)
+
+
 def apply_hp_change(character: Character, delta: int) -> tuple[int, int]:
-    """delta < 0 damage, delta > 0 heal. Returns old,new."""
+    """Legacy: plain HP change without damage-type modifiers."""
+    return apply_damage(character, delta, damage_type="")
+
+
+def apply_damage(
+    character: Character,
+    delta: int,
+    damage_type: str = "",
+) -> tuple[int, int]:
+    """Apply damage (delta<0) or healing (delta>0) honouring resistances.
+
+    - Resistance → |dmg| // 2
+    - Immunity   → |dmg| = 0
+    - Vulnerability → |dmg| × 2
+    Modifiers only apply to damage (delta < 0), not to healing.
+    """
     old = character.hp_current
+    if delta < 0 and damage_type:
+        res = _resist_map(character)
+        dmg = abs(delta)
+        dtype = damage_type.strip().lower()
+        if dtype in res.get("immune", []):
+            dmg = 0
+        elif dtype in res.get("resist", []):
+            dmg = dmg // 2
+        elif dtype in res.get("vulnerable", []):
+            dmg = dmg * 2
+        delta = -dmg
+
     if delta < 0:
         remaining_damage = abs(delta)
         if character.temp_hp > 0:
@@ -181,6 +379,159 @@ def apply_hp_change(character: Character, delta: int) -> tuple[int, int]:
     elif delta > 0:
         character.hp_current = min(character.hp_max, character.hp_current + delta)
     return old, character.hp_current
+
+
+def _resist_map(character: Character) -> dict[str, list[str]]:
+    try:
+        data = json.loads(character.resistances_json or "{}")
+    except Exception:
+        return {"resist": [], "immune": [], "vulnerable": []}
+    return {
+        "resist": [s.strip().lower() for s in data.get("resist", []) if isinstance(s, str)],
+        "immune": [s.strip().lower() for s in data.get("immune", []) if isinstance(s, str)],
+        "vulnerable": [s.strip().lower() for s in data.get("vulnerable", []) if isinstance(s, str)],
+    }
+
+
+# ─── Death saves ──────────────────────────────────────────────────────────
+
+@dataclass
+class DeathSaveResult:
+    d20: int
+    is_crit_success: bool   # nat20 → instantly wake with 1 HP
+    is_crit_fail: bool      # nat1  → counts as 2 fails
+    success: bool           # 10+
+    successes: int
+    failures: int
+    stabilized: bool        # 3 successes OR nat20 woke up
+    dead: bool              # 3 failures
+    woke_up: bool           # nat20
+
+    def format(self) -> str:
+        icons = "✅" * self.successes + "❌" * self.failures
+        head = f"💀 Спасбросок смерти: d20={self.d20}"
+        if self.is_crit_success:
+            head += " (nat20 → встаёшь с 1 HP)"
+        elif self.is_crit_fail:
+            head += " (nat1 → два провала)"
+        elif self.success:
+            head += " → успех"
+        else:
+            head += " → провал"
+        tail = f"  [{icons or '—'}]"
+        return head + tail
+
+
+def roll_death_save(character: Character) -> DeathSaveResult:
+    """Roll one death save, mutate character counters, return the result.
+
+    Rules (from system_prompt.md):
+      - 10+ → success
+      - 1–9 → failure
+      - nat20 → wake up with 1 HP (reset counters)
+      - nat1 → 2 failures
+      - 3 successes → stabilized
+      - 3 failures → dead
+    """
+    d20 = random.randint(1, 20)
+    is_nat20 = d20 == 20
+    is_nat1 = d20 == 1
+
+    if is_nat20:
+        character.death_saves_success = 0
+        character.death_saves_failure = 0
+        character.hp_current = max(1, character.hp_current)
+        if character.hp_current == 0:
+            character.hp_current = 1
+        return DeathSaveResult(
+            d20=d20, is_crit_success=True, is_crit_fail=False,
+            success=True, successes=0, failures=0,
+            stabilized=True, dead=False, woke_up=True,
+        )
+
+    if is_nat1:
+        character.death_saves_failure = min(3, character.death_saves_failure + 2)
+    elif d20 >= 10:
+        character.death_saves_success = min(3, character.death_saves_success + 1)
+    else:
+        character.death_saves_failure = min(3, character.death_saves_failure + 1)
+
+    stabilized = character.death_saves_success >= 3
+    dead = character.death_saves_failure >= 3
+    if stabilized and not dead:
+        character.death_saves_success = 0
+        character.death_saves_failure = 0
+
+    return DeathSaveResult(
+        d20=d20, is_crit_success=False, is_crit_fail=is_nat1,
+        success=d20 >= 10,
+        successes=character.death_saves_success,
+        failures=character.death_saves_failure,
+        stabilized=stabilized, dead=dead, woke_up=False,
+    )
+
+
+# ─── Rest ─────────────────────────────────────────────────────────────────
+
+def perform_short_rest(character: Character) -> list[str]:
+    """Short rest: spend 1 Hit Die to recover HP, clear stabilized. Returns
+    human-readable lines for the chat log.
+    """
+    lines: list[str] = []
+    if character.hit_dice_remaining <= 0:
+        lines.append("🕒 Короткий отдых: костей хитов нет — отдохнуть удалось, но HP не восстановлено.")
+    else:
+        character.hit_dice_remaining -= 1
+        hd_roll = random.randint(1, 8)
+        con_mod = ability_mod(character, "CON")
+        heal = max(1, hd_roll + con_mod)
+        old, new = apply_damage(character, heal, damage_type="")
+        lines.append(f"🕒 Короткий отдых: d8={hd_roll} +Тел {con_mod:+d} → +{heal} HP ({old} → {new})")
+        lines.append(f"   Костей хитов осталось: {character.hit_dice_remaining}/{character.hit_dice_max}")
+
+    # Clear ephemeral conditions tied to combat exertion.
+    conds = _norm_cond_set(character.conditions_json)
+    for c in ("stabilized",):
+        if c in conds:
+            conds.discard(c)
+    character.conditions_json = json.dumps(sorted(conds), ensure_ascii=False)
+    return lines
+
+
+def perform_long_rest(character: Character) -> list[str]:
+    """Long rest: full HP, reset death saves, restore hit dice up to half,
+    remove one level of Exhaustion. Returns chat-facing summary lines.
+    """
+    lines: list[str] = []
+    old_hp = character.hp_current
+    character.hp_current = character.hp_max
+    character.temp_hp = 0
+    character.death_saves_success = 0
+    character.death_saves_failure = 0
+    restored = max(1, character.hit_dice_max // 2)
+    character.hit_dice_remaining = min(character.hit_dice_max, character.hit_dice_remaining + restored)
+    character.rest_status_json = '{"short_rest_used":false,"long_rest_available":true}'
+
+    # Clear typical "combat-scoped" conditions, step Exhaustion down by 1.
+    conds = _norm_cond_set(character.conditions_json)
+    cleared: list[str] = []
+    for c in ("poisoned", "frightened", "unconscious", "stabilized", "prone", "grappled"):
+        if c in conds:
+            conds.discard(c)
+            cleared.append(c)
+    # Exhaustion: stored as "exhaustion" (level not tracked numerically here).
+    # Step one level (= remove the flag if present).
+    if "exhaustion" in conds:
+        conds.discard("exhaustion")
+        cleared.append("exhaustion −1")
+    character.conditions_json = json.dumps(sorted(conds), ensure_ascii=False)
+
+    lines.append(f"🌙 Длинный отдых завершён.")
+    lines.append(f"♥ HP восстановлено: {old_hp} → {character.hp_current}")
+    lines.append(f"🎲 Костей хитов: {character.hit_dice_remaining}/{character.hit_dice_max}")
+    if cleared:
+        lines.append(f"✨ Сняты состояния: {', '.join(cleared)}")
+    return lines
 
 
 def _roll_d20(advantage: bool, disadvantage: bool) -> tuple[int, int | None]:
