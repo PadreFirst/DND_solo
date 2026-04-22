@@ -65,6 +65,49 @@ class StartingItem(BaseModel):
     damage_dice: str = ""
 
 
+class TradeItem(BaseModel):
+    """One slot inside a merchant's `trade_offer`. Price is in gold."""
+    name: str = ""
+    emoji: str = ""
+    item_type: str = "misc"
+    damage_dice: str = ""
+    price: int = 0
+    quantity: int = 1
+
+
+class TradeOffer(BaseModel):
+    """Merchant NPC pitches goods. Surfaced to the player after the narrative
+    so they can decide to buy next turn. If `buys_from_player` is True the
+    merchant is also interested in purchases (LLM can declare `buy_back`
+    prices for items the PC owns).
+    """
+    npc: str = ""
+    items: list[TradeItem] = Field(default_factory=list)
+    buys_from_player: bool = False
+    # Standard rate the NPC pays for used gear (as a fraction, e.g. 0.4 = 40%).
+    buy_back_rate: float = 0.5
+
+
+class RecipeComponent(BaseModel):
+    name: str = ""
+    quantity: int = 1
+
+
+class Recipe(BaseModel):
+    """Crafting recipe — stored in `Character.known_recipes_json` after being
+    granted by the LLM (found in a book, taught by NPC, etc).
+    """
+    name: str = ""
+    result_name: str = ""
+    result_emoji: str = ""
+    result_type: str = "misc"
+    result_damage_dice: str = ""
+    result_quantity: int = 1
+    components: list[RecipeComponent] = Field(default_factory=list)
+    skill: str = "ловкость рук"  # skill name used for the craft check
+    dc: int = 12
+
+
 class CharacterSetup(BaseModel):
     """LLM-generated starting stats for a new character. Only used at world
     opening. Without this the engine used to seed a generic medieval fighter,
@@ -102,3 +145,11 @@ class TurnPlan(BaseModel):
     scene_enemies: list[SceneEnemy] = Field(default_factory=list)
     # Used ONLY at world opening. Ignored on every other turn.
     character_setup: CharacterSetup | None = None
+    # Trading: NPC merchants pitch their wares via this field. Pure display +
+    # a hint to the player for the next turn ("купить пистолет за 120 золота").
+    trade_offer: TradeOffer | None = None
+    # Direct gold movement (buy/sell, loot purse, tips). Positive = gain.
+    direct_gold_change: int = 0
+    # Crafting: LLM hands the player a blueprint. Stored in
+    # Character.known_recipes_json on the spot so /craft can see it.
+    grant_recipe: Recipe | None = None

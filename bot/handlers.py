@@ -299,6 +299,112 @@ def _rest_keyboard():
     ])
 
 
+@router.message(Command("combat"))
+async def cmd_combat(message: Message, game: GameService, db: AsyncSession) -> None:
+    user = await game.get_or_create_user(db, message.from_user.id, message.from_user.username)
+    gs = await game.ensure_session(db, user)
+    if not gs.combat_active:
+        await message.answer("⚔ Боя сейчас нет.")
+        return
+    scene = json.loads(gs.scene_state_json or "[]")
+    header = __import__("bot.services.engine", fromlist=["format_combat_status"]).format_combat_status(gs)
+    enemies = " | ".join(
+        f"{e.get('name', '?')} (HP {e.get('hp_current', '?')}/{e.get('hp_max', '?')}, КД {e.get('ac', '?')})"
+        for e in scene
+    ) or "никого"
+    await message.answer(f"{header}\n⚔ Враги: {enemies}", parse_mode="HTML")
+
+
+@router.callback_query(F.data == "menu:combat")
+async def on_menu_combat(cb: CallbackQuery, game: GameService, db: AsyncSession) -> None:
+    await cb.answer()
+    user = await game.get_or_create_user(db, cb.from_user.id, cb.from_user.username)
+    gs = await game.ensure_session(db, user)
+    if not gs.combat_active:
+        await cb.message.answer("⚔ Боя сейчас нет.")
+        return
+    scene = json.loads(gs.scene_state_json or "[]")
+    from bot.services.engine import format_combat_status
+    enemies = " | ".join(
+        f"{e.get('name', '?')} (HP {e.get('hp_current', '?')}/{e.get('hp_max', '?')}, КД {e.get('ac', '?')})"
+        for e in scene
+    ) or "никого"
+    await cb.message.answer(f"{format_combat_status(gs)}\n⚔ Враги: {enemies}", parse_mode="HTML")
+
+
+# ── Trading ──────────────────────────────────────────────────────────
+
+@router.message(Command("shop"))
+async def cmd_shop(message: Message, game: GameService, db: AsyncSession) -> None:
+    user = await game.get_or_create_user(db, message.from_user.id, message.from_user.username)
+    npc = await game.find_active_merchant(db, user)
+    await message.answer(game.format_shop(npc), parse_mode="HTML")
+
+
+@router.callback_query(F.data == "menu:shop")
+async def on_menu_shop(cb: CallbackQuery, game: GameService, db: AsyncSession) -> None:
+    await cb.answer()
+    user = await game.get_or_create_user(db, cb.from_user.id, cb.from_user.username)
+    npc = await game.find_active_merchant(db, user)
+    await cb.message.answer(game.format_shop(npc), parse_mode="HTML")
+
+
+@router.message(Command("buy"))
+async def cmd_buy(message: Message, game: GameService, db: AsyncSession) -> None:
+    args = (message.text or "").partition(" ")[2].strip()
+    if not args:
+        await message.answer("Использование: <code>/buy &lt;название&gt; [количество]</code>", parse_mode="HTML")
+        return
+    parts = args.rsplit(" ", 1)
+    qty = 1
+    name = args
+    if len(parts) == 2 and parts[1].isdigit():
+        name = parts[0].strip()
+        qty = max(1, int(parts[1]))
+    user = await game.get_or_create_user(db, message.from_user.id, message.from_user.username)
+    text = await game.perform_buy(db, user, name, qty)
+    await message.answer(text, parse_mode="HTML")
+
+
+@router.message(Command("sell"))
+async def cmd_sell(message: Message, game: GameService, db: AsyncSession) -> None:
+    args = (message.text or "").partition(" ")[2].strip()
+    if not args:
+        await message.answer("Использование: <code>/sell &lt;название&gt; [количество]</code>", parse_mode="HTML")
+        return
+    parts = args.rsplit(" ", 1)
+    qty = 1
+    name = args
+    if len(parts) == 2 and parts[1].isdigit():
+        name = parts[0].strip()
+        qty = max(1, int(parts[1]))
+    user = await game.get_or_create_user(db, message.from_user.id, message.from_user.username)
+    text = await game.perform_sell(db, user, name, qty)
+    await message.answer(text, parse_mode="HTML")
+
+
+# ── Crafting ──────────────────────────────────────────────────────────
+
+@router.message(Command("craft"))
+async def cmd_craft(message: Message, game: GameService, db: AsyncSession) -> None:
+    args = (message.text or "").partition(" ")[2].strip()
+    user = await game.get_or_create_user(db, message.from_user.id, message.from_user.username)
+    ch = await game.ensure_character(db, user)
+    if not args:
+        await message.answer(game.format_recipes(ch), parse_mode="HTML")
+        return
+    text = await game.craft_item(db, user, args)
+    await message.answer(text, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "menu:craft")
+async def on_menu_craft(cb: CallbackQuery, game: GameService, db: AsyncSession) -> None:
+    await cb.answer()
+    user = await game.get_or_create_user(db, cb.from_user.id, cb.from_user.username)
+    ch = await game.ensure_character(db, user)
+    await cb.message.answer(game.format_recipes(ch), parse_mode="HTML")
+
+
 @router.message(Command("help"))
 async def cmd_help(message: Message) -> None:
     await message.answer(
@@ -307,6 +413,11 @@ async def cmd_help(message: Message) -> None:
         "/stats — карточка персонажа\n"
         "/inventory — инвентарь с формулами урона\n"
         "/quest — активные квесты\n"
+        "/shop — товары ближайшего торговца\n"
+        "/buy &lt;item&gt; [qty] — купить\n"
+        "/sell &lt;item&gt; [qty] — продать\n"
+        "/craft [рецепт] — список или крафт\n"
+        "/combat — статус боя (раунд, инициатива)\n"
         "/hint — подсказка GM\n"
         "/rest — короткий или длинный отдых\n"
         "/new — новая игра (очищает сцену)\n\n"

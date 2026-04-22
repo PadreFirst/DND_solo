@@ -14,9 +14,13 @@ from bot.schemas import (
     CharacterSetup,
     EnemyAction,
     InventoryChange,
+    Recipe,
+    RecipeComponent,
     RollRequest,
     SceneEnemy,
     StartingItem,
+    TradeItem,
+    TradeOffer,
     TurnPlan,
 )
 from bot.services import engine
@@ -558,15 +562,27 @@ class GameService:
         # we overwrite; otherwise we keep whatever was active (so the engine
         # can deplete HP across turns).
         scene: list[dict] = json.loads(gs.scene_state_json or "[]")
+        was_in_combat = bool(gs.combat_active)
         if plan.scene_enemies:
             scene = [e.model_dump() for e in plan.scene_enemies]
         if plan.combat_active:
             gs.combat_active = True
 
+        # Combat state machine: first turn that flips into combat rolls
+        # initiative once for player + every enemy. Subsequent turns just
+        # advance the round counter after the player acts.
+        combat_started_now = False
+        if gs.combat_active and scene and not was_in_combat:
+            engine.start_combat(gs, ch, scene)
+            combat_started_now = True
+
         # === PRE-NARRATIVE mechanics (goes BEFORE the story text) ===
         pre_lines: list[str] = []
 
         if gs.combat_active and scene:
+            if combat_started_now:
+                pre_lines.append("⚔ Начинается бой! Инициатива брошена.")
+            pre_lines.append(engine.format_combat_status(gs))
             enemies_line = " | ".join(
                 f"{e.get('name', '?')} (HP {e.get('hp_current', '?')}/{e.get('hp_max', '?')}, КД {e.get('ac', '?')})"
                 for e in scene
@@ -600,6 +616,18 @@ class GameService:
                         f"⚠ Атака '{rr.label}': нет подходящего оружия в руках — бросок не делаем."
                     )
                     continue
+
+                # Hard check (combat state machine): одна атака = одно
+                # действие за раунд. Повторная атака в том же раунде
+                # отбрасывается с явным сообщением — это предсказуемая
+                # механика, а не "LLM решила так".
+                if gs.combat_active and gs.action_used:
+                    pre_lines.append(
+                        f"⚠ Атака '{rr.label}': действие уже потрачено в этом раунде."
+                    )
+                    continue
+                if gs.combat_active:
+                    gs.action_used = True
 
                 rich = engine.make_attack_roll(
                     ch, rr.dc, ability_key=ability_key,
@@ -742,11 +770,36 @@ class GameService:
             fr.reputation_score = max(-100, min(100, fr.reputation_score + rep.value))
             post_lines.append(f"📊 Репутация {rep.faction}: {old_rep} → {fr.reputation_score}")
 
+        # Direct gold movement from trading, loot purses, tips.
+        if plan.direct_gold_change:
+            old_gold = ch.gold
+            ch.gold = max(0, ch.gold + plan.direct_gold_change)
+            sign = "+" if plan.direct_gold_change > 0 else ""
+            post_lines.append(f"💰 Золото: {old_gold} → {ch.gold} ({sign}{plan.direct_gold_change})")
+
+        # Trade offer from a merchant — persist NPC inventory + render pitch.
+        if plan.trade_offer and plan.trade_offer.npc:
+            await self._apply_trade_offer(db, user, plan.trade_offer)
+            lines_for_offer = self._format_trade_offer(plan.trade_offer)
+            post_lines.append(lines_for_offer)
+
+        # Grant a recipe — append to known_recipes_json (dedup by name).
+        if plan.grant_recipe and plan.grant_recipe.name:
+            added = self._grant_recipe(ch, plan.grant_recipe)
+            if added:
+                post_lines.append(
+                    f"📜 Получен рецепт: <b>{plan.grant_recipe.name}</b> — /craft чтобы скрафтить."
+                )
+
         # Clean up dead enemies + close combat if the scene is empty.
         scene = [e for e in scene if int(e.get("hp_current", 0) or 0) > 0]
         if gs.combat_active and not scene:
-            gs.combat_active = False
+            engine.end_combat(gs)
             post_lines.append("🏳 Все враги повержены — бой окончен.")
+        elif gs.combat_active:
+            # End of player's turn in combat → bump round, reset economy.
+            engine.advance_round(gs, ch)
+            post_lines.append(f"🔄 Раунд {gs.round_number} — действие готово снова.")
         gs.scene_state_json = json.dumps(scene, ensure_ascii=False)
 
         options = self._ensure_options(plan.options)
@@ -852,6 +905,315 @@ class GameService:
                     await db.commit()
         except Exception:
             log.exception("Adventure summary task failed")
+
+    # ─── Trading ──────────────────────────────────────────────────────
+
+    async def _apply_trade_offer(
+        self, db: AsyncSession, user: User, offer: TradeOffer,
+    ) -> NPCState:
+        """Store (or update) the merchant's inventory in NPCState so /shop
+        can show it even if the player types a new message and the offer
+        leaves the visible chat log.
+        """
+        npc = await db.scalar(
+            select(NPCState).where(
+                NPCState.user_id == user.id, NPCState.name == offer.npc,
+            )
+        )
+        gs = await db.scalar(select(GameSession).where(GameSession.user_id == user.id))
+        items_json = json.dumps(
+            [it.model_dump() for it in offer.items], ensure_ascii=False
+        )
+        if not npc:
+            npc = NPCState(
+                user_id=user.id,
+                name=offer.npc,
+                current_location=gs.current_location if gs else "",
+                attitude="neutral",
+                inventory_json=items_json,
+                notes=f"buys_from_player={offer.buys_from_player}; rate={offer.buy_back_rate}",
+            )
+            db.add(npc)
+            await db.flush()
+        else:
+            npc.inventory_json = items_json
+            if gs:
+                npc.current_location = gs.current_location
+            npc.notes = f"buys_from_player={offer.buys_from_player}; rate={offer.buy_back_rate}"
+        return npc
+
+    @staticmethod
+    def _format_trade_offer(offer: TradeOffer) -> str:
+        if not offer.items:
+            return f"🛒 <b>{offer.npc}</b>: сейчас у торговца пусто."
+        lines = [f"🛒 <b>{offer.npc}</b> предлагает:"]
+        for it in offer.items:
+            emoji = it.emoji or "•"
+            dmg = f" [{it.damage_dice}]" if it.damage_dice else ""
+            qty = f" ×{it.quantity}" if it.quantity > 1 else ""
+            lines.append(f" • {emoji} {it.name}{dmg}{qty} — 💰 {it.price}")
+        if offer.buys_from_player:
+            rate = int(offer.buy_back_rate * 100)
+            lines.append(f"\n<i>Скупает б/у по {rate}% номинала. /sell &lt;предмет&gt; чтобы продать.</i>")
+        lines.append("<i>/buy &lt;предмет&gt; чтобы купить.</i>")
+        return "\n".join(lines)
+
+    async def find_active_merchant(
+        self, db: AsyncSession, user: User,
+    ) -> NPCState | None:
+        """Return the merchant NPC standing in the player's current location
+        (whose inventory_json isn't empty). Prefers the most recently touched
+        one when several are present.
+        """
+        gs = await self.ensure_session(db, user)
+        npcs = list(await db.scalars(
+            select(NPCState).where(NPCState.user_id == user.id)
+        ))
+        for n in npcs:
+            if n.current_location != gs.current_location:
+                continue
+            try:
+                items = json.loads(n.inventory_json or "[]")
+            except Exception:
+                items = []
+            if items:
+                return n
+        return None
+
+    @staticmethod
+    def format_shop(npc: NPCState | None) -> str:
+        if not npc:
+            return (
+                "🛒 Торговцев рядом нет. Подойди к NPC с товаром или попроси "
+                "GM представить тебе торговца."
+            )
+        try:
+            items = json.loads(npc.inventory_json or "[]")
+        except Exception:
+            items = []
+        if not items:
+            return f"🛒 <b>{npc.name}</b>: сейчас у торговца пусто."
+        lines = [f"🛒 <b>{npc.name}</b> — прилавок:"]
+        for it in items:
+            emoji = it.get("emoji") or "•"
+            dmg = f" [{it.get('damage_dice')}]" if it.get("damage_dice") else ""
+            qty = f" ×{it.get('quantity', 1)}" if int(it.get("quantity", 1) or 1) > 1 else ""
+            lines.append(f" • {emoji} {it.get('name')}{dmg}{qty} — 💰 {it.get('price', '?')}")
+        lines.append("\n<i>/buy &lt;название&gt; — купить, /sell &lt;название&gt; — продать.</i>")
+        return "\n".join(lines)
+
+    async def perform_buy(
+        self, db: AsyncSession, user: User, item_name: str, quantity: int = 1,
+    ) -> str:
+        """Buy `quantity` of `item_name` from the current location's merchant.
+
+        Rules:
+          - Merchant must exist at current location with matching item.
+          - Character must have enough gold.
+          - Item is decremented from NPC inventory, stacked into PC inventory,
+            gold moves, and a human-readable line is returned.
+        """
+        ch = await self.ensure_character(db, user)
+        npc = await self.find_active_merchant(db, user)
+        if not npc:
+            return "🛒 Торговцев рядом нет — покупать не у кого."
+        try:
+            items = json.loads(npc.inventory_json or "[]")
+        except Exception:
+            items = []
+        low = (item_name or "").strip().lower()
+        idx = next(
+            (i for i, it in enumerate(items)
+             if low in (it.get("name") or "").lower()
+             or (it.get("name") or "").lower() in low),
+            None,
+        )
+        if idx is None:
+            return f"🛒 У {npc.name} нет «{item_name}»."
+        entry = items[idx]
+        available = int(entry.get("quantity", 1) or 1)
+        want = max(1, min(quantity, available))
+        price = int(entry.get("price", 0) or 0) * want
+        if ch.gold < price:
+            return f"💰 Не хватает золота: нужно {price}, есть {ch.gold}."
+
+        ch.gold -= price
+        new_item = {
+            "name": entry.get("name", ""),
+            "emoji": entry.get("emoji", "•"),
+            "type": entry.get("item_type", "misc"),
+            "quantity": want,
+            "is_equipped": False,
+        }
+        if entry.get("damage_dice"):
+            new_item["damage_dice"] = entry["damage_dice"]
+
+        pc_inv = json.loads(ch.inventory_json or "[]")
+        existing = next(
+            (i for i, it in enumerate(pc_inv)
+             if (it.get("name") or "").lower() == new_item["name"].lower()
+             and it.get("type") == new_item["type"]),
+            None,
+        )
+        if existing is not None:
+            pc_inv[existing]["quantity"] = int(pc_inv[existing].get("quantity", 1) or 1) + want
+        else:
+            pc_inv.append(new_item)
+        ch.inventory_json = json.dumps(pc_inv, ensure_ascii=False)
+
+        entry["quantity"] = available - want
+        if entry["quantity"] <= 0:
+            items.pop(idx)
+        npc.inventory_json = json.dumps(items, ensure_ascii=False)
+
+        return (
+            f"🛒 Куплено: {new_item.get('emoji', '•')} {new_item['name']} ×{want} — "
+            f"−{price} 💰 (осталось {ch.gold})."
+        )
+
+    async def perform_sell(
+        self, db: AsyncSession, user: User, item_name: str, quantity: int = 1,
+    ) -> str:
+        """Sell `quantity` of `item_name` from PC inventory to the current
+        merchant. Price = NPC's listed price × buy_back_rate (default 50%).
+        Falls back to 10 gold for items that have no known market price.
+        """
+        ch = await self.ensure_character(db, user)
+        npc = await self.find_active_merchant(db, user)
+        if not npc:
+            return "🛒 Торговцев рядом нет — продавать некому."
+        pc_inv = json.loads(ch.inventory_json or "[]")
+        low = (item_name or "").strip().lower()
+        idx = next(
+            (i for i, it in enumerate(pc_inv)
+             if low in (it.get("name") or "").lower()
+             or (it.get("name") or "").lower() in low),
+            None,
+        )
+        if idx is None:
+            return f"🎒 В инвентаре нет «{item_name}»."
+        entry = pc_inv[idx]
+        available = int(entry.get("quantity", 1) or 1)
+        want = max(1, min(quantity, available))
+
+        try:
+            npc_items = json.loads(npc.inventory_json or "[]")
+        except Exception:
+            npc_items = []
+        base_price = 10
+        rate = 0.5
+        notes = (npc.notes or "")
+        m = re.search(r"rate=([0-9.]+)", notes)
+        if m:
+            try:
+                rate = float(m.group(1))
+            except Exception:
+                pass
+        matching_offer = next(
+            (it for it in npc_items
+             if (it.get("name") or "").lower() == (entry.get("name") or "").lower()),
+            None,
+        )
+        if matching_offer:
+            base_price = int(matching_offer.get("price", base_price) or base_price)
+        price = max(1, int(base_price * rate)) * want
+        ch.gold += price
+
+        entry["quantity"] = available - want
+        if entry["quantity"] <= 0:
+            pc_inv.pop(idx)
+        ch.inventory_json = json.dumps(pc_inv, ensure_ascii=False)
+
+        return (
+            f"🛒 Продано: {entry.get('emoji', '•')} {entry.get('name')} ×{want} — "
+            f"+{price} 💰 (итого {ch.gold})."
+        )
+
+    # ─── Crafting ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def _grant_recipe(ch: Character, recipe: Recipe) -> bool:
+        """Append a recipe to `known_recipes_json` if not already there.
+        Returns True if it was actually added."""
+        try:
+            recipes = json.loads(ch.known_recipes_json or "[]")
+        except Exception:
+            recipes = []
+        key = recipe.name.strip().lower()
+        for r in recipes:
+            if (r.get("name") or "").strip().lower() == key:
+                return False
+        recipes.append(recipe.model_dump())
+        ch.known_recipes_json = json.dumps(recipes, ensure_ascii=False)
+        return True
+
+    @staticmethod
+    def format_recipes(ch: Character) -> str:
+        try:
+            recipes = json.loads(ch.known_recipes_json or "[]")
+        except Exception:
+            recipes = []
+        if not recipes:
+            return (
+                "📜 Рецептов пока нет. Находи чертежи, учись у мастеров — "
+                "LLM сможет вручить /craft-рецепты по сюжету."
+            )
+        lines = ["📜 <b>Известные рецепты</b>"]
+        for r in recipes:
+            comps = ", ".join(
+                f"{c.get('name')}×{c.get('quantity', 1)}"
+                for c in r.get("components", [])
+            ) or "—"
+            lines.append(
+                f" • <b>{r.get('name')}</b> → {r.get('result_emoji', '•')} "
+                f"{r.get('result_name', r.get('name'))} "
+                f"(DC {r.get('dc', 12)} {r.get('skill', 'ловкость рук')}) — "
+                f"нужно: {comps}"
+            )
+        lines.append("\n<i>/craft &lt;название&gt; чтобы попробовать.</i>")
+        return "\n".join(lines)
+
+    async def craft_item(
+        self, db: AsyncSession, user: User, recipe_name: str,
+    ) -> str:
+        """Run one crafting attempt. Returns a chat-ready summary string."""
+        ch = await self.ensure_character(db, user)
+        gs = await self.ensure_session(db, user)
+        try:
+            recipes = json.loads(ch.known_recipes_json or "[]")
+        except Exception:
+            recipes = []
+        low = (recipe_name or "").strip().lower()
+        target = next(
+            (r for r in recipes
+             if low == (r.get("name") or "").strip().lower()
+             or low in (r.get("name") or "").lower()),
+            None,
+        )
+        if target is None:
+            return f"📜 Рецепт «{recipe_name}» не найден. Посмотри список — /craft без аргумента."
+
+        result = engine.attempt_craft(ch, target, gs=gs)
+
+        if result.missing:
+            return (
+                f"❌ Не хватает компонентов для «{target.get('name')}»:\n"
+                + "\n".join(f" • {m}" for m in result.missing)
+            )
+
+        lines: list[str] = [result.roll_line]
+        spent = ", ".join(
+            f"{name}×{qty}" for name, qty in result.components_consumed
+        ) or "—"
+        lines.append(f"🧰 Потрачено: {spent}")
+        if result.success:
+            lines.append(
+                f"✅ Изготовлено: {target.get('result_emoji', '•')} "
+                f"{result.produced_name} ×{result.produced_quantity}"
+            )
+        else:
+            lines.append("💥 Провал: компоненты частично испорчены.")
+        return "\n".join(lines)
 
     async def perform_rest(
         self, db: AsyncSession, user: User, kind: str,

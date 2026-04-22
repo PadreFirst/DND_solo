@@ -534,6 +534,202 @@ def perform_long_rest(character: Character) -> list[str]:
     return lines
 
 
+# ─── Combat state machine ─────────────────────────────────────────────────
+#
+# Stored on GameSession in plain columns (initiative_order_json, round_number,
+# current_turn_index, action_used, bonus_used, reaction_used,
+# movement_remaining). This block keeps the math in one place and never
+# reaches into the DB directly — the caller commits.
+
+def start_combat(gs: GameSession, character: Character, scene: list[dict]) -> list[dict]:
+    """Roll initiative for the player + every live enemy and store the
+    order back onto GameSession. Returns the full initiative order list of
+    {name, init, side, is_player} dicts.
+    """
+    dex_mod = ability_mod(character, "DEX")
+    player_init = random.randint(1, 20) + dex_mod
+    order: list[dict] = [
+        {"name": character.name or "Герой", "init": player_init,
+         "side": "player", "is_player": True},
+    ]
+    for enemy in scene:
+        if int(enemy.get("hp_current", 0) or 0) <= 0:
+            continue
+        # Enemies without stats get a middling +0 init — stable & predictable.
+        enemy_init = random.randint(1, 20) + int(enemy.get("dex_mod", 0) or 0)
+        order.append({
+            "name": enemy.get("name") or "Враг",
+            "init": enemy_init,
+            "side": "enemy",
+            "is_player": False,
+        })
+    order.sort(key=lambda x: x["init"], reverse=True)
+
+    gs.combat_active = True
+    gs.initiative_order_json = json.dumps(order, ensure_ascii=False)
+    gs.round_number = 1
+    gs.current_turn_index = 0
+    reset_action_economy(gs, character)
+    return order
+
+
+def end_combat(gs: GameSession) -> None:
+    """Leave combat cleanly — wipe initiative, reset round counter."""
+    gs.combat_active = False
+    gs.initiative_order_json = "[]"
+    gs.round_number = 0
+    gs.current_turn_index = 0
+    gs.action_used = False
+    gs.bonus_used = False
+    gs.reaction_used = False
+
+
+def reset_action_economy(gs: GameSession, character: Character) -> None:
+    """Called at the start of every player round: fresh action/bonus/reaction
+    and full movement budget.
+    """
+    gs.action_used = False
+    gs.bonus_used = False
+    gs.reaction_used = False
+    gs.movement_remaining = character.speed_m or 9
+
+
+def advance_round(gs: GameSession, character: Character) -> None:
+    """One round = each combatant acted once. We model it loosely: after
+    the player's turn has been processed (rolls + enemy_actions), bump the
+    round counter and reset the player's action economy.
+    """
+    if not gs.combat_active:
+        return
+    gs.round_number = (gs.round_number or 0) + 1
+    reset_action_economy(gs, character)
+
+
+def format_combat_status(gs: GameSession) -> str:
+    """Header line shown in the pre-narrative block during combat."""
+    try:
+        order = json.loads(gs.initiative_order_json or "[]")
+    except Exception:
+        order = []
+    if not order:
+        return f"⚔ Раунд {gs.round_number or 1}"
+    init_line = " · ".join(f"{o['name']}({o['init']})" for o in order)
+    econ = []
+    if not gs.action_used:
+        econ.append("действие")
+    if not gs.bonus_used:
+        econ.append("бонус")
+    if not gs.reaction_used:
+        econ.append("реакция")
+    econ_line = f" | ресурсы: {', '.join(econ) or '—'}" if econ else ""
+    mv = gs.movement_remaining or 0
+    return f"⚔ Раунд {gs.round_number or 1} | Инициатива: {init_line} | ход: {mv}м{econ_line}"
+
+
+# ─── Crafting ─────────────────────────────────────────────────────────────
+
+@dataclass
+class CraftResult:
+    success: bool
+    missing: list[str] = field(default_factory=list)   # "имя (нужно N, есть M)"
+    roll_line: str = ""                                 # rolled skill check as text
+    produced_name: str = ""                             # item added on success
+    produced_quantity: int = 0
+    components_consumed: list[tuple[str, int]] = field(default_factory=list)
+
+
+def _match_inventory_slot(inventory: list[dict], needle: str) -> int | None:
+    low = (needle or "").strip().lower()
+    if not low:
+        return None
+    for i, item in enumerate(inventory):
+        name = (item.get("name") or "").strip().lower()
+        if name == low or low in name or name in low:
+            return i
+    return None
+
+
+def attempt_craft(
+    character: Character,
+    recipe: dict,
+    gs: GameSession | None = None,
+) -> CraftResult:
+    """Deterministically resolve one crafting attempt.
+
+    Flow:
+      1) Verify every component is present in inventory_json with enough qty.
+      2) Roll the recipe's skill check at its DC.
+      3) On success: consume components, add result to inventory. On failure:
+         consume HALF of the components (rounded up) — failed crafting still
+         wastes materials per TZ.
+    """
+    inventory = json.loads(character.inventory_json or "[]")
+    required: list[tuple[str, int]] = [
+        (c.get("name") or "", int(c.get("quantity", 1) or 1))
+        for c in recipe.get("components", []) if c.get("name")
+    ]
+
+    missing: list[str] = []
+    slot_map: dict[str, int] = {}
+    for name, qty in required:
+        idx = _match_inventory_slot(inventory, name)
+        if idx is None or int(inventory[idx].get("quantity", 0) or 0) < qty:
+            have = 0 if idx is None else int(inventory[idx].get("quantity", 0) or 0)
+            missing.append(f"{name} (нужно {qty}, есть {have})")
+        else:
+            slot_map[name] = idx
+    if missing:
+        return CraftResult(success=False, missing=missing)
+
+    skill = recipe.get("skill") or "ловкость рук"
+    dc = int(recipe.get("dc") or 12)
+    rich = make_skill_check(character, skill, dc, gs=gs)
+    roll_line = rich.format(kind="Крафт")
+
+    # Consume components — full on success, half (rounded up) on failure.
+    consumed: list[tuple[str, int]] = []
+    for name, qty in required:
+        to_take = qty if rich.success else (qty + 1) // 2
+        idx = slot_map[name]
+        inventory[idx]["quantity"] = int(inventory[idx].get("quantity", 0)) - to_take
+        consumed.append((name, to_take))
+    # Drop emptied stacks.
+    inventory = [i for i in inventory if int(i.get("quantity", 0) or 0) > 0]
+
+    produced_name = ""
+    produced_qty = 0
+    if rich.success:
+        produced_name = recipe.get("result_name") or recipe.get("name") or "Изделие"
+        produced_qty = int(recipe.get("result_quantity", 1) or 1)
+        new_item: dict = {
+            "name": produced_name,
+            "emoji": recipe.get("result_emoji", "•"),
+            "type": recipe.get("result_type", "misc"),
+            "quantity": produced_qty,
+            "is_equipped": False,
+        }
+        if recipe.get("result_damage_dice"):
+            new_item["damage_dice"] = recipe["result_damage_dice"]
+        # Stack with existing same-name slot if possible.
+        existing = _match_inventory_slot(inventory, produced_name)
+        if existing is not None and inventory[existing].get("type", "misc") == new_item["type"]:
+            inventory[existing]["quantity"] = (
+                int(inventory[existing].get("quantity", 1) or 1) + produced_qty
+            )
+        else:
+            inventory.append(new_item)
+
+    character.inventory_json = json.dumps(inventory, ensure_ascii=False)
+    return CraftResult(
+        success=rich.success,
+        missing=[],
+        roll_line=roll_line,
+        produced_name=produced_name,
+        produced_quantity=produced_qty,
+        components_consumed=consumed,
+    )
+
+
 def _roll_d20(advantage: bool, disadvantage: bool) -> tuple[int, int | None]:
     if advantage or disadvantage:
         a = random.randint(1, 20)
