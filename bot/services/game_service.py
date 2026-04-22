@@ -11,9 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models import Character, FactionReputation, GameSession, MessageLog, NPCState, Quest, User
 from bot.schemas import (
+    Ability,
+    AbilityUse,
     CharacterSetup,
+    CompanionSpec,
     EnemyAction,
     InventoryChange,
+    LevelUpOffer,
+    LevelUpPerk,
+    QuestEvent,
     Recipe,
     RecipeComponent,
     RollRequest,
@@ -224,6 +230,14 @@ class GameService:
             ch.inventory_json = json.dumps(inv, ensure_ascii=False)
             if equip:
                 ch.equipment_json = json.dumps(equip, ensure_ascii=False)
+        if setup.starting_abilities:
+            starter_powers: list[dict] = []
+            for ab in setup.starting_abilities:
+                power = ab.model_dump()
+                if int(power.get("current_uses", 0) or 0) == 0:
+                    power["current_uses"] = int(power.get("max_uses", 1) or 1)
+                starter_powers.append(power)
+            ch.powers_json = json.dumps(starter_powers, ensure_ascii=False)
         if setup.universe:
             gs.universe = setup.universe[:255]
         if setup.narrative_style:
@@ -789,10 +803,20 @@ class GameService:
             while ch.xp_current >= ch.xp_to_next_level:
                 ch.level += 1
                 ch.xp_to_next_level += 300 + (ch.level - 1) * 200
+                # Baseline bumps — applied immediately so combat stays alive.
                 ch.hp_max += 6 + max(1, ch.ability_mod("CON"))
                 ch.hp_current = ch.hp_max
                 ch.proficiency_bonus = 2 + max(0, (ch.level - 1) // 4)
-                post_lines.append(f"🎉 Новый уровень: {ch.level}")
+                # Hit dice also grow with level.
+                ch.hit_dice_max = max(ch.hit_dice_max, ch.level)
+                ch.hit_dice_remaining = min(ch.hit_dice_max, ch.hit_dice_remaining + 1)
+                # Queue a perk-picker. User gets /levelup button. Each pending
+                # level-up adds one ability-score / power / proficiency perk.
+                ch.pending_level_ups = int(ch.pending_level_ups or 0) + 1
+                post_lines.append(
+                    f"🎉 Новый уровень: {ch.level}! "
+                    f"Нажми /levelup — выбрать перк."
+                )
 
         for rep in plan.reputation_change:
             fr = await db.scalar(
@@ -828,10 +852,44 @@ class GameService:
                     f"📜 Получен рецепт: <b>{plan.grant_recipe.name}</b> — /craft чтобы скрафтить."
                 )
 
+        # Grant a new universe-agnostic ability (spell / Force power / gadget).
+        if plan.grant_ability and plan.grant_ability.name:
+            if self._grant_ability_plain(ch, plan.grant_ability):
+                post_lines.append(
+                    f"✨ Новая способность: <b>{plan.grant_ability.name}</b> — /abilities."
+                )
+
+        # LLM narrated an ability use (rare; usually player uses /use). Spend
+        # the charge so it doesn't become free.
+        if plan.ability_use and plan.ability_use.name:
+            ok, reason = engine.consume_power_charge(ch, plan.ability_use.name)
+            if ok:
+                post_lines.append(f"✨ Использовано: {reason}")
+            else:
+                post_lines.append(f"⚠ {reason}")
+
+        # Structured quest events.
+        for ev in plan.quest_events or []:
+            line = await self._apply_quest_event(db, user, ev)
+            if line:
+                post_lines.append(line)
+
+        # Companion additions / removals.
+        if plan.add_companion and plan.add_companion.name:
+            line = await self._apply_add_companion(db, user, plan.add_companion)
+            if line:
+                post_lines.append(line)
+        if plan.remove_companion:
+            line = await self._apply_remove_companion(db, user, plan.remove_companion)
+            if line:
+                post_lines.append(line)
+
         # Clean up dead enemies + close combat if the scene is empty.
         scene = [e for e in scene if int(e.get("hp_current", 0) or 0) > 0]
         if gs.combat_active and not scene:
             engine.end_combat(gs)
+            # Encounter-scoped abilities refresh when combat ends.
+            post_lines.extend(engine.refresh_powers(ch, "encounter"))
             post_lines.append("🏳 Все враги повержены — бой окончен.")
         elif gs.combat_active:
             # End of player's turn in combat → bump round, reset economy.
@@ -1305,6 +1363,381 @@ class GameService:
         ch = await self.ensure_character(db, user)
         ok, reason = engine.remove_attunement(ch, item_name)
         return f"{'✅' if ok else '⚠'} {reason}"
+
+    # ─── Universe-agnostic abilities (spells / Force powers / gags) ──
+
+    @staticmethod
+    def format_abilities(ch: Character) -> str:
+        return engine.format_powers(ch)
+
+    @staticmethod
+    def _grant_ability_plain(ch: Character, ability: Ability) -> bool:
+        power = ability.model_dump()
+        if int(power.get("current_uses", 0) or 0) == 0:
+            power["current_uses"] = int(power.get("max_uses", 1) or 1)
+        return engine.add_power(ch, power)
+
+    async def use_ability(
+        self, db: AsyncSession, user: User, ability_name: str,
+    ) -> str:
+        """Player-triggered `/use <name>`. Spends a charge, rolls dice if any,
+        returns a human-readable result block. The actual narrative outcome
+        is decided by the LLM on the next turn — we just handle mechanics.
+        """
+        ch = await self.ensure_character(db, user)
+        power = engine.find_power(ch, ability_name)
+        if not power:
+            return (
+                f"✨ Способность «{ability_name}» не найдена.\n"
+                f"Список доступных — /abilities."
+            )
+        ok, reason = engine.consume_power_charge(ch, power["name"])
+        if not ok:
+            return f"⚠ {reason}"
+
+        lines = [f"✨ <b>{power.get('emoji','✨')} {power['name']}</b> — активировано"]
+        if power.get("description"):
+            lines.append(f"<i>{power['description']}</i>")
+        # Roll damage if any.
+        if power.get("damage_dice"):
+            total, expr = engine.roll_damage(power["damage_dice"])
+            dtype = power.get("damage_type", "")
+            lines.append(f"🎲 Урон: <code>{expr}</code> = <b>{total}</b>"
+                         + (f" ({dtype})" if dtype else ""))
+        if power.get("heal_dice"):
+            total, expr = engine.roll_damage(power["heal_dice"])
+            old, new = engine.apply_damage(ch, -total, damage_type="")
+            lines.append(f"💚 Лечение: <code>{expr}</code> = <b>{total}</b> → HP {old} → {new}")
+        if power.get("save_ability") and power.get("save_dc"):
+            lines.append(
+                f"🛡 Цель должна сделать сейв "
+                f"<b>{power['save_ability']}</b> vs <b>DC {power['save_dc']}</b>"
+            )
+        refresh = power.get("refresh", "long")
+        if refresh != "at_will":
+            rem = int(power.get("current_uses", 0) or 0) - 1 + (1 if ok else 0)
+            # Re-read after save:
+            cur_power = engine.find_power(ch, power["name"])
+            if cur_power:
+                rem = int(cur_power.get("current_uses", 0) or 0)
+            mx = int(power.get("max_uses", 1) or 1)
+            lines.append(f"🔋 Зарядов осталось: {rem}/{mx}")
+        lines.append("")
+        lines.append("<i>Результат будет отыгран в следующей реплике ГМ.</i>")
+        return "\n".join(lines)
+
+    # ─── Quest journal ────────────────────────────────────────────────
+
+    async def _apply_quest_event(
+        self, db: AsyncSession, user: User, event: QuestEvent,
+    ) -> str:
+        """Create / update / complete a Quest row from the LLM's structured
+        event. Returns a short status line for the post-narrative block.
+        """
+        if not event.title:
+            return ""
+        title_low = event.title.strip().lower()
+        existing = list(await db.scalars(
+            select(Quest).where(Quest.user_id == user.id)
+        ))
+        row = next(
+            (q for q in existing if q.title.strip().lower() == title_low),
+            None,
+        )
+        action = (event.action or "create").lower()
+
+        if action == "create":
+            if row:
+                return ""  # idempotent — don't duplicate
+            q = Quest(
+                user_id=user.id,
+                title=event.title[:255],
+                description=event.description or "",
+                giver=event.giver or "",
+                is_main=bool(event.is_main),
+                status="active",
+                steps_json=json.dumps(
+                    [s.model_dump() for s in event.steps], ensure_ascii=False,
+                ),
+                reward_xp=int(event.reward_xp or 0),
+                reward_gold=int(event.reward_gold or 0),
+            )
+            db.add(q)
+            await db.flush()
+            icon = "📜" if event.is_main else "📝"
+            return f"{icon} Новый квест: <b>{event.title}</b>"
+
+        if not row:
+            # silently ignore updates to nonexistent quests
+            return ""
+
+        if action == "update":
+            if event.description:
+                row.description = event.description
+            if event.steps:
+                row.steps_json = json.dumps(
+                    [s.model_dump() for s in event.steps], ensure_ascii=False,
+                )
+            return f"📝 Квест обновлён: <b>{event.title}</b>"
+
+        if action == "complete_step":
+            try:
+                steps = json.loads(row.steps_json or "[]")
+            except Exception:
+                steps = []
+            key = (event.step_key_completed or "").strip().lower()
+            for s in steps:
+                if (s.get("key") or "").strip().lower() == key:
+                    s["done"] = True
+                    break
+            row.steps_json = json.dumps(steps, ensure_ascii=False)
+            return f"✓ Шаг квеста «{event.title}»: {event.step_key_completed}"
+
+        if action == "complete":
+            row.status = "completed"
+            lines = [f"🏆 Квест завершён: <b>{event.title}</b>"]
+            if row.reward_xp:
+                ch = await self.ensure_character(db, user)
+                ch.xp_current += row.reward_xp
+                lines.append(f"   ⭐ +{row.reward_xp} XP")
+            if row.reward_gold:
+                ch = await self.ensure_character(db, user)
+                ch.gold += row.reward_gold
+                lines.append(f"   💰 +{row.reward_gold} золота")
+            return "\n".join(lines)
+
+        if action == "fail":
+            row.status = "failed"
+            return f"💀 Квест провален: <b>{event.title}</b>"
+
+        return ""
+
+    async def format_quest_journal(self, db: AsyncSession, user: User) -> str:
+        rows = list(await db.scalars(
+            select(Quest).where(Quest.user_id == user.id)
+        ))
+        if not rows:
+            return (
+                "📜 <b>Журнал квестов</b>\n"
+                "Записей пока нет. Новые квесты попадают сюда автоматически."
+            )
+        active = [q for q in rows if q.status == "active"]
+        done = [q for q in rows if q.status == "completed"]
+        failed = [q for q in rows if q.status == "failed"]
+
+        def _fmt(q: Quest) -> str:
+            icon = "📜" if q.is_main else "📝"
+            line = f"{icon} <b>{q.title}</b>"
+            if q.giver:
+                line += f" <i>(от {q.giver})</i>"
+            if q.description:
+                line += f"\n   {q.description}"
+            try:
+                steps = json.loads(q.steps_json or "[]")
+            except Exception:
+                steps = []
+            for s in steps:
+                mark = "✓" if s.get("done") else "☐"
+                line += f"\n   {mark} {s.get('description', s.get('key', '?'))}"
+            if q.reward_xp or q.reward_gold:
+                parts = []
+                if q.reward_xp:
+                    parts.append(f"{q.reward_xp} XP")
+                if q.reward_gold:
+                    parts.append(f"{q.reward_gold} зол.")
+                line += f"\n   Награда: {', '.join(parts)}"
+            return line
+
+        out = ["📜 <b>Журнал квестов</b>"]
+        if active:
+            out.append("\n<b>Активные</b>")
+            out.extend(_fmt(q) for q in active)
+        if done:
+            out.append("\n<b>Завершённые</b>")
+            out.extend(_fmt(q) for q in done)
+        if failed:
+            out.append("\n<b>Провалены</b>")
+            out.extend(_fmt(q) for q in failed)
+        return "\n".join(out)
+
+    # ─── Companions ───────────────────────────────────────────────────
+
+    async def _apply_add_companion(
+        self, db: AsyncSession, user: User, spec: CompanionSpec,
+    ) -> str:
+        if not spec.name:
+            return ""
+        existing = await db.scalar(
+            select(NPCState).where(
+                NPCState.user_id == user.id,
+                NPCState.name == spec.name,
+                NPCState.is_companion == True,  # noqa: E712
+            )
+        )
+        if existing:
+            return f"🤝 {spec.name} уже в отряде."
+        npc = NPCState(
+            user_id=user.id,
+            name=spec.name,
+            role=spec.role or "",
+            hp_current=spec.hp_current or spec.hp_max or 10,
+            hp_max=spec.hp_max or 10,
+            ac=spec.ac or 12,
+            attack_bonus=spec.attack_bonus or 3,
+            damage_dice=spec.damage_dice or "1d6",
+            damage_type=spec.damage_type or "",
+            initiative_bonus=spec.initiative_bonus or 0,
+            notes=spec.notes or "",
+            attitude="ally",
+            is_companion=True,
+        )
+        db.add(npc)
+        await db.flush()
+        return f"🤝 В отряде теперь: <b>{spec.name}</b>{(' — ' + spec.role) if spec.role else ''}"
+
+    async def _apply_remove_companion(
+        self, db: AsyncSession, user: User, name: str,
+    ) -> str:
+        row = await db.scalar(
+            select(NPCState).where(
+                NPCState.user_id == user.id,
+                NPCState.name == name,
+                NPCState.is_companion == True,  # noqa: E712
+            )
+        )
+        if not row:
+            return ""
+        row.is_companion = False
+        row.attitude = "neutral"
+        return f"👋 {name} покинул отряд."
+
+    async def format_companions(self, db: AsyncSession, user: User) -> str:
+        rows = list(await db.scalars(
+            select(NPCState).where(
+                NPCState.user_id == user.id,
+                NPCState.is_companion == True,  # noqa: E712
+            )
+        ))
+        if not rows:
+            return (
+                "🤝 <b>Отряд</b>\n"
+                "Ты путешествуешь в одиночку. Напарники появляются по сюжету."
+            )
+        lines = ["🤝 <b>Отряд</b>"]
+        for n in rows:
+            hp = f"{n.hp_current}/{n.hp_max}"
+            line = f" • <b>{n.name}</b>"
+            if n.role:
+                line += f" — {n.role}"
+            line += f"\n   ♥ {hp}  ⛨ КД {n.ac}  ⚔ +{n.attack_bonus} / {n.damage_dice}"
+            if n.notes:
+                line += f"\n   <i>{n.notes}</i>"
+            lines.append(line)
+        return "\n".join(lines)
+
+    # ─── Level-up perk picker ─────────────────────────────────────────
+
+    @staticmethod
+    def _universe_aware_perk_pool(ch: Character, gs: GameSession) -> list[LevelUpPerk]:
+        """Cheap, universe-agnostic fallback perk pool — always works even
+        without the LLM. Real flavor comes from LLM-generated perks, but we
+        keep this as a safety net so /levelup never fails.
+        """
+        stats = ["STR", "DEX", "CON", "INT", "WIS", "CHA"]
+        # Pick two lowest stats as targets for +1 so progression feels good.
+        try:
+            scores = json.loads(ch.abilities_json or "{}")
+        except Exception:
+            scores = {}
+        ordered = sorted(stats, key=lambda k: int(scores.get(k, 10) or 10))
+        stat_a = ordered[0]
+        stat_b = ordered[1] if len(ordered) > 1 else ordered[0]
+        ru = engine.ABILITY_RU
+        perks: list[LevelUpPerk] = [
+            LevelUpPerk(
+                id="stat_a",
+                label=f"+1 {ru.get(stat_a, stat_a)}",
+                description=f"Повысить {ru.get(stat_a, stat_a)} на +1.",
+                effect_type="stat", stat_key=stat_a, stat_delta=1,
+            ),
+            LevelUpPerk(
+                id="stat_b",
+                label=f"+1 {ru.get(stat_b, stat_b)}",
+                description=f"Повысить {ru.get(stat_b, stat_b)} на +1.",
+                effect_type="stat", stat_key=stat_b, stat_delta=1,
+            ),
+            LevelUpPerk(
+                id="hp",
+                label="+4 максимум HP",
+                description="Увеличить максимальный запас здоровья на 4.",
+                effect_type="hp", hp_delta=4,
+            ),
+        ]
+        return perks
+
+    async def propose_level_up_perks(
+        self, db: AsyncSession, user: User, ch: Character, gs: GameSession,
+    ) -> LevelUpOffer:
+        """Build a LevelUpOffer. Asks Gemini for a setting-aware perk list;
+        on any failure falls back to the deterministic universe-agnostic pool.
+        """
+        try:
+            offer = await self.gemini.propose_level_up(ch, gs)
+            if offer and offer.perks:
+                offer.new_level = ch.level
+                return offer
+        except Exception:
+            log.exception("propose_level_up LLM failure — using fallback pool")
+        # Fallback: deterministic
+        return LevelUpOffer(
+            new_level=ch.level,
+            flavor=f"Уровень {ch.level}! Пришло время расти.",
+            perks=self._universe_aware_perk_pool(ch, gs),
+        )
+
+    async def apply_level_up_perk(
+        self, db: AsyncSession, user: User, perk: LevelUpPerk,
+    ) -> str:
+        """Apply the picked perk to the character. Decrements pending_level_ups."""
+        ch = await self.ensure_character(db, user)
+        if int(ch.pending_level_ups or 0) <= 0:
+            return "Нет ожидающих повышений."
+        et = (perk.effect_type or "feature").lower()
+        summary = ""
+        if et == "stat" and perk.stat_key and perk.stat_delta:
+            try:
+                scores = json.loads(ch.abilities_json or "{}")
+            except Exception:
+                scores = {}
+            key = perk.stat_key.upper()
+            scores[key] = int(scores.get(key, 10) or 10) + int(perk.stat_delta)
+            ch.abilities_json = json.dumps(scores, ensure_ascii=False)
+            summary = f"📈 {engine.ABILITY_RU.get(key, key)} +{perk.stat_delta} → {scores[key]}"
+        elif et == "hp" and perk.hp_delta:
+            ch.hp_max += int(perk.hp_delta)
+            ch.hp_current += int(perk.hp_delta)
+            summary = f"♥ Максимум HP +{perk.hp_delta} (теперь {ch.hp_max})"
+        elif et == "proficiency" and perk.proficiency_name:
+            try:
+                profs = json.loads(ch.skill_proficiencies_json or "[]")
+            except Exception:
+                profs = []
+            name = perk.proficiency_name.strip().lower()
+            if name and name not in [str(p).lower() for p in profs]:
+                profs.append(name)
+            ch.skill_proficiencies_json = json.dumps(profs, ensure_ascii=False)
+            summary = f"🎯 Новое владение: {perk.proficiency_name}"
+        elif et == "ability" and perk.granted_ability:
+            added = self._grant_ability_plain(ch, perk.granted_ability)
+            if added:
+                summary = f"✨ Новая способность: {perk.granted_ability.name}"
+            else:
+                summary = f"✨ Способность «{perk.granted_ability.name}» уже была — заряды обновлены."
+        else:
+            summary = f"🎉 Перк «{perk.label}» применён."
+
+        ch.pending_level_ups = max(0, int(ch.pending_level_ups or 0) - 1)
+        return summary
 
     async def perform_rest(
         self, db: AsyncSession, user: User, kind: str,

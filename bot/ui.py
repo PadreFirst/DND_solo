@@ -46,6 +46,14 @@ def menu_keyboard(web_app_url: str | None = None) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🌙 Отдых", callback_data="menu:rest"),
             ],
             [
+                InlineKeyboardButton(text="✨ Способности", callback_data="menu:abilities"),
+                InlineKeyboardButton(text="📜 Квесты", callback_data="menu:quests"),
+            ],
+            [
+                InlineKeyboardButton(text="🤝 Отряд", callback_data="menu:companions"),
+                InlineKeyboardButton(text="🎉 Прокачка", callback_data="menu:levelup"),
+            ],
+            [
                 InlineKeyboardButton(text="⚖ Нагрузка", callback_data="menu:carry"),
                 InlineKeyboardButton(text="✨ Настройка", callback_data="menu:attunement"),
             ],

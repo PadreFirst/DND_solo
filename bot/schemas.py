@@ -117,6 +117,110 @@ class Recipe(BaseModel):
     dc: int = 12
 
 
+class Ability(BaseModel):
+    """A universe-agnostic active ability — could be a D&D spell, a Jedi
+    Force power, a Chip'n'Dale gadget, a Shrek gingerbread man's sugar-rush,
+    whatever. The engine doesn't care: it tracks charges, the LLM supplies
+    the fiction + any dice.
+
+    Refresh policy:
+      "short"  — restored on a short rest
+      "long"   — restored on a long rest
+      "encounter" — reset on combat end
+      "at_will"  — no tracking (infinite uses)
+    """
+    name: str = ""
+    emoji: str = ""
+    description: str = ""
+    max_uses: int = 1
+    current_uses: int = 1
+    refresh: str = "long"  # short|long|encounter|at_will
+    tags: list[str] = Field(default_factory=list)  # free-form: "fire", "mind", "stealth"
+    # Optional dice the engine rolls when the ability is /use-d. Leaving all
+    # blank means this is purely narrative — engine just spends the charge.
+    damage_dice: str = ""
+    damage_type: str = ""
+    heal_dice: str = ""
+    save_ability: str = ""  # STR|DEX|CON|INT|WIS|CHA — for save-vs-ability effects
+    save_dc: int = 0
+
+
+class AbilityUse(BaseModel):
+    """Player triggered an ability via /use (or LLM narrated the use). Code
+    rolls dice and spends the charge.
+    """
+    name: str = ""
+    target: str = ""
+
+
+class LevelUpPerk(BaseModel):
+    """One option on the level-up menu. LLM proposes 3 of these tailored to
+    the character's universe/concept so a jedi gets Force perks, a hobbit
+    gets courage/craft perks, etc. Engine applies the effect when picked.
+
+    effect_type values:
+      "stat"        → bump one ability score by +1 or +2 (field: stat_key, stat_delta)
+      "hp"          → extra HP (field: hp_delta)
+      "proficiency" → gain a skill/save proficiency (field: proficiency_name)
+      "ability"     → grant a new Ability (field: granted_ability)
+      "feature"     → cosmetic/narrative feat (no mechanical change beyond flavor)
+    """
+    id: str = ""        # short slug, used in callback data
+    label: str = ""     # short button caption
+    description: str = ""
+    effect_type: str = "feature"
+    stat_key: str = ""         # STR|DEX|CON|INT|WIS|CHA
+    stat_delta: int = 0
+    hp_delta: int = 0
+    proficiency_name: str = ""
+    granted_ability: Ability | None = None
+
+
+class LevelUpOffer(BaseModel):
+    """Bundle of perks shown to the player after crossing an XP threshold."""
+    new_level: int = 0
+    flavor: str = ""   # one-line congrats in-setting
+    perks: list[LevelUpPerk] = Field(default_factory=list)
+
+
+class QuestStep(BaseModel):
+    key: str = ""
+    description: str = ""
+    done: bool = False
+
+
+class QuestEvent(BaseModel):
+    """Structured quest event emitted by the LLM. Creates/updates/completes a
+    row in the `quests` table.
+    """
+    action: str = "create"  # create|update|complete_step|complete|fail
+    title: str = ""          # natural-language title; doubles as a lookup key
+    description: str = ""
+    giver: str = ""
+    is_main: bool = False
+    steps: list[QuestStep] = Field(default_factory=list)
+    step_key_completed: str = ""  # when action=complete_step
+    reward_xp: int = 0
+    reward_gold: int = 0
+
+
+class CompanionSpec(BaseModel):
+    """A party-member NPC recruited by the player. Works in combat alongside
+    the PC (rolls initiative, takes damage, can attack). Not a real human —
+    just a bot-controlled ally.
+    """
+    name: str = ""
+    role: str = ""  # short description: "лекарь", "дроид-разведчик", "пёс"
+    hp_current: int = 10
+    hp_max: int = 10
+    ac: int = 12
+    attack_bonus: int = 3
+    damage_dice: str = "1d6"
+    damage_type: str = ""
+    initiative_bonus: int = 0
+    notes: str = ""
+
+
 class CharacterSetup(BaseModel):
     """LLM-generated starting stats for a new character. Only used at world
     opening. Without this the engine used to seed a generic medieval fighter,
@@ -131,6 +235,7 @@ class CharacterSetup(BaseModel):
     skill_proficiencies: list[str] = Field(default_factory=list)
     saving_throw_proficiencies: list[str] = Field(default_factory=list)
     starting_inventory: list[StartingItem] = Field(default_factory=list)
+    starting_abilities: list[Ability] = Field(default_factory=list)
 
 
 class TurnPlan(BaseModel):
@@ -168,3 +273,15 @@ class TurnPlan(BaseModel):
     # for. Leave 0 to skip.
     passive_perception_dc: int = 0
     passive_perception_reveal: str = ""  # narrative hint shown ONLY on success
+    # Ability granted this turn (new spell learned, new Force power, etc).
+    # Stored in Character.abilities_json.
+    grant_ability: Ability | None = None
+    # LLM can ALSO report a narrative ability-use — engine spends the charge
+    # and rolls dice. Usually triggered by /use but the LLM may narrate one
+    # too (e.g. NPC gift scene).
+    ability_use: AbilityUse | None = None
+    # Structured quest events — create/update/complete quest rows.
+    quest_events: list[QuestEvent] = Field(default_factory=list)
+    # Companions.
+    add_companion: CompanionSpec | None = None
+    remove_companion: str = ""

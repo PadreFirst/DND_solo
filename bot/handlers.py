@@ -406,6 +406,165 @@ async def on_menu_craft(cb: CallbackQuery, game: GameService, db: AsyncSession) 
     await cb.message.answer(game.format_recipes(ch), parse_mode="HTML")
 
 
+@router.message(Command("abilities"))
+async def cmd_abilities(message: Message, game: GameService, db: AsyncSession) -> None:
+    user = await game.get_or_create_user(db, message.from_user.id, message.from_user.username)
+    ch = await game.ensure_character(db, user)
+    await message.answer(game.format_abilities(ch), parse_mode="HTML")
+
+
+@router.callback_query(F.data == "menu:abilities")
+async def on_menu_abilities(cb: CallbackQuery, game: GameService, db: AsyncSession) -> None:
+    await cb.answer()
+    user = await game.get_or_create_user(db, cb.from_user.id, cb.from_user.username)
+    ch = await game.ensure_character(db, user)
+    await cb.message.answer(game.format_abilities(ch), parse_mode="HTML")
+
+
+@router.message(Command("use"))
+async def cmd_use(message: Message, game: GameService, db: AsyncSession) -> None:
+    args = (message.text or "").partition(" ")[2].strip()
+    if not args:
+        await message.answer(
+            "Использование: <code>/use &lt;название&gt;</code>\n"
+            "Список — /abilities",
+            parse_mode="HTML",
+        )
+        return
+    user = await game.get_or_create_user(db, message.from_user.id, message.from_user.username)
+    await message.answer(
+        await game.use_ability(db, user, args),
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command("quests"))
+async def cmd_quests(message: Message, game: GameService, db: AsyncSession) -> None:
+    user = await game.get_or_create_user(db, message.from_user.id, message.from_user.username)
+    await message.answer(await game.format_quest_journal(db, user), parse_mode="HTML")
+
+
+@router.callback_query(F.data == "menu:quests")
+async def on_menu_quests(cb: CallbackQuery, game: GameService, db: AsyncSession) -> None:
+    await cb.answer()
+    user = await game.get_or_create_user(db, cb.from_user.id, cb.from_user.username)
+    await cb.message.answer(await game.format_quest_journal(db, user), parse_mode="HTML")
+
+
+@router.message(Command("companions"))
+async def cmd_companions(message: Message, game: GameService, db: AsyncSession) -> None:
+    user = await game.get_or_create_user(db, message.from_user.id, message.from_user.username)
+    await message.answer(await game.format_companions(db, user), parse_mode="HTML")
+
+
+@router.callback_query(F.data == "menu:companions")
+async def on_menu_companions(cb: CallbackQuery, game: GameService, db: AsyncSession) -> None:
+    await cb.answer()
+    user = await game.get_or_create_user(db, cb.from_user.id, cb.from_user.username)
+    await cb.message.answer(await game.format_companions(db, user), parse_mode="HTML")
+
+
+# ── Level-up perk picker ─────────────────────────────────────────────
+#
+# Kept out of aiogram FSM (parity with /onboarding) — the offer waiting
+# for the player's pick is stashed in Character.pending_levelup_offer_json
+# so we don't re-spin Gemini on the callback and don't collide with
+# last_options_json (which holds number-option buttons).
+
+def _levelup_kb(offer):
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    rows = []
+    for perk in offer.perks or []:
+        rows.append([InlineKeyboardButton(
+            text=(perk.label or perk.id)[:60],
+            callback_data=f"lvl:{perk.id}",
+        )])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _format_offer(offer) -> str:
+    lines = [f"🎉 <b>Уровень {offer.new_level}!</b>"]
+    if offer.flavor:
+        lines.append(f"<i>{offer.flavor}</i>")
+    lines.append("")
+    lines.append("Выбери, что прокачать:")
+    for perk in offer.perks or []:
+        lines.append(f"\n<b>{perk.label}</b>")
+        if perk.description:
+            lines.append(f"  {perk.description}")
+    return "\n".join(lines)
+
+
+async def _run_levelup_flow(
+    message_or_cb, game: GameService, db: AsyncSession, chat_id_source,
+) -> None:
+    user = await game.get_or_create_user(
+        db, chat_id_source.from_user.id, chat_id_source.from_user.username,
+    )
+    ch = await game.ensure_character(db, user)
+    gs = await game.ensure_session(db, user)
+    target = message_or_cb
+    if int(ch.pending_level_ups or 0) <= 0:
+        await target.answer(
+            "Нет ожидающих повышений. Уровни открываются через XP "
+            "(см. /stats).",
+        )
+        return
+    offer = await game.propose_level_up_perks(db, user, ch, gs)
+    ch.pending_levelup_offer_json = json.dumps(
+        {"perks": [p.model_dump() for p in offer.perks],
+         "new_level": offer.new_level,
+         "flavor": offer.flavor},
+        ensure_ascii=False,
+    )
+    await target.answer(
+        _format_offer(offer),
+        reply_markup=_levelup_kb(offer),
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command("levelup"))
+async def cmd_levelup(message: Message, game: GameService, db: AsyncSession) -> None:
+    await _run_levelup_flow(message, game, db, message)
+
+
+@router.callback_query(F.data == "menu:levelup")
+async def on_menu_levelup(cb: CallbackQuery, game: GameService, db: AsyncSession) -> None:
+    await cb.answer()
+    await _run_levelup_flow(cb.message, game, db, cb)
+
+
+@router.callback_query(F.data.startswith("lvl:"))
+async def on_levelup_pick(
+    cb: CallbackQuery, game: GameService, db: AsyncSession,
+) -> None:
+    from bot.schemas import LevelUpPerk
+    perk_id = cb.data.split(":", 1)[1]
+    user = await game.get_or_create_user(db, cb.from_user.id, cb.from_user.username)
+    ch = await game.ensure_character(db, user)
+    try:
+        stash = json.loads(ch.pending_levelup_offer_json or "{}")
+    except Exception:
+        stash = {}
+    perks = stash.get("perks") or []
+    picked = next((p for p in perks if p.get("id") == perk_id), None)
+    if not picked:
+        await cb.answer("Предложение устарело — открой /levelup снова.", show_alert=True)
+        return
+    perk = LevelUpPerk(**picked)
+    summary = await game.apply_level_up_perk(db, user, perk)
+    ch.pending_levelup_offer_json = ""
+    await cb.answer("Применено.")
+    try:
+        await cb.message.edit_text(
+            f"✅ <b>Выбран перк:</b> {perk.label}\n\n{summary}",
+            parse_mode="HTML",
+        )
+    except Exception:
+        await cb.message.answer(f"✅ {summary}", parse_mode="HTML")
+
+
 @router.message(Command("carry"))
 async def cmd_carry(message: Message, game: GameService, db: AsyncSession) -> None:
     user = await game.get_or_create_user(db, message.from_user.id, message.from_user.username)
@@ -620,6 +779,11 @@ async def cmd_help(message: Message) -> None:
         "/buy &lt;item&gt; [qty] — купить\n"
         "/sell &lt;item&gt; [qty] — продать\n"
         "/craft [рецепт] — список или крафт\n"
+        "/abilities — список способностей\n"
+        "/use &lt;название&gt; — применить способность\n"
+        "/quests — журнал квестов\n"
+        "/companions — напарники\n"
+        "/levelup — выбрать перк уровня\n"
         "/combat — статус боя (раунд, инициатива)\n"
         "/carry — нагрузка и грузоподъёмность\n"
         "/attunement — настроенные предметы\n"

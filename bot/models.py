@@ -54,6 +54,17 @@ class Character(Base):
     class_features_json: Mapped[str] = mapped_column(Text, default="[]")
     spell_slots_json: Mapped[str] = mapped_column(Text, default="{}")
     known_spells_json: Mapped[str] = mapped_column(Text, default="[]")
+    # Universe-agnostic abilities (spells, Force powers, gadgets, racial
+    # tricks — all go here). Each entry is an Ability (see schemas.py).
+    # Note: Character.abilities_json above holds STR/DEX/etc scores; this
+    # column is intentionally named `powers_json` to avoid the collision.
+    powers_json: Mapped[str] = mapped_column(Text, default="[]")
+    # Number of un-picked level-ups. Set on XP crossing, decremented when
+    # the player picks a perk.
+    pending_level_ups: Mapped[int] = mapped_column(Integer, default=0)
+    # Cached LevelUpOffer (list of perks) awaiting the player's pick — lives
+    # between /levelup and the `lvl:<id>` callback.
+    pending_levelup_offer_json: Mapped[str] = mapped_column(Text, default="")
     known_recipes_json: Mapped[str] = mapped_column(Text, default="[]")
     attunement_json: Mapped[str] = mapped_column(Text, default='{"max":3,"items":[]}')
     rest_status_json: Mapped[str] = mapped_column(Text, default='{"short_rest_used":false,"long_rest_available":true}')
@@ -162,6 +173,13 @@ class NPCState(Base):
     statblock_json: Mapped[str] = mapped_column(Text, default="{}")
     is_quest_critical: Mapped[bool] = mapped_column(Boolean, default=False)
     notes: Mapped[str] = mapped_column(Text, default="")
+    # True for bot-controlled allies who roll initiative with the player.
+    is_companion: Mapped[bool] = mapped_column(Boolean, default=False)
+    attack_bonus: Mapped[int] = mapped_column(Integer, default=3)
+    damage_dice: Mapped[str] = mapped_column(String(24), default="1d6")
+    damage_type: Mapped[str] = mapped_column(String(24), default="")
+    initiative_bonus: Mapped[int] = mapped_column(Integer, default=0)
+    role: Mapped[str] = mapped_column(String(120), default="")
 
 
 class FactionReputation(Base):

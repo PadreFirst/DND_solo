@@ -511,6 +511,7 @@ def perform_short_rest(character: Character) -> list[str]:
         if c in conds:
             conds.discard(c)
     character.conditions_json = json.dumps(sorted(conds), ensure_ascii=False)
+    lines.extend(refresh_powers(character, "short"))
     return lines
 
 
@@ -547,7 +548,142 @@ def perform_long_rest(character: Character) -> list[str]:
     lines.append(f"🎲 Костей хитов: {character.hit_dice_remaining}/{character.hit_dice_max}")
     if cleared:
         lines.append(f"✨ Сняты состояния: {', '.join(cleared)}")
+    lines.extend(refresh_powers(character, "long"))
     return lines
+
+
+# ─── Universe-agnostic abilities / powers ───────────────────────────────
+
+def _load_powers(character: Character) -> list[dict]:
+    try:
+        data = json.loads(character.powers_json or "[]")
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _save_powers(character: Character, powers: list[dict]) -> None:
+    character.powers_json = json.dumps(powers, ensure_ascii=False)
+
+
+def list_powers(character: Character) -> list[dict]:
+    return _load_powers(character)
+
+
+def find_power(character: Character, name: str) -> dict | None:
+    low = (name or "").strip().lower()
+    if not low:
+        return None
+    for p in _load_powers(character):
+        pn = (p.get("name") or "").lower()
+        if pn == low or low in pn or pn in low:
+            return p
+    return None
+
+
+def add_power(character: Character, power: dict) -> bool:
+    """Append a new power. Duplicates by name are rejected silently."""
+    name = (power.get("name") or "").strip()
+    if not name:
+        return False
+    existing = _load_powers(character)
+    if any((p.get("name") or "").lower() == name.lower() for p in existing):
+        return False
+    # Defaults to keep the JSON shape tidy.
+    power = dict(power)
+    power.setdefault("emoji", "✨")
+    power.setdefault("description", "")
+    power.setdefault("max_uses", 1)
+    power.setdefault("current_uses", power["max_uses"])
+    power.setdefault("refresh", "long")
+    power.setdefault("tags", [])
+    existing.append(power)
+    _save_powers(character, existing)
+    return True
+
+
+def consume_power_charge(character: Character, name: str) -> tuple[bool, str]:
+    """Spend one charge of the named power. Returns (ok, reason)."""
+    powers = _load_powers(character)
+    for p in powers:
+        pn = (p.get("name") or "").lower()
+        low = (name or "").strip().lower()
+        if pn == low or (low and (low in pn or pn in low)):
+            refresh = (p.get("refresh") or "long").lower()
+            if refresh == "at_will":
+                return True, p.get("name") or name
+            cur = int(p.get("current_uses", 0) or 0)
+            if cur <= 0:
+                return False, f"«{p.get('name')}» — заряды кончились."
+            p["current_uses"] = cur - 1
+            _save_powers(character, powers)
+            return True, p.get("name") or name
+    return False, f"Способность «{name}» не найдена."
+
+
+def refresh_powers(character: Character, kind: str) -> list[str]:
+    """Restore charges on rest / encounter end. Returns human lines.
+
+    kind: "short" | "long" | "encounter"
+    """
+    powers = _load_powers(character)
+    restored: list[str] = []
+    for p in powers:
+        refresh = (p.get("refresh") or "long").lower()
+        cur = int(p.get("current_uses", 0) or 0)
+        mx = int(p.get("max_uses", 1) or 1)
+        if cur >= mx:
+            continue
+        will_restore = False
+        if kind == "long":
+            will_restore = refresh in ("short", "long", "encounter")
+        elif kind == "short":
+            will_restore = refresh in ("short", "encounter")
+        elif kind == "encounter":
+            will_restore = refresh == "encounter"
+        if will_restore:
+            p["current_uses"] = mx
+            restored.append(f"{p.get('emoji','✨')} {p.get('name')} — заряды восстановлены ({mx}/{mx})")
+    if restored:
+        _save_powers(character, powers)
+    return restored
+
+
+def format_powers(character: Character) -> str:
+    powers = _load_powers(character)
+    if not powers:
+        return (
+            "✨ <b>Способности</b>\n"
+            "Пока пусто. Способности открываются по мере игры — сюжетно "
+            "или при повышении уровня."
+        )
+    lines = ["✨ <b>Способности</b>"]
+    for p in powers:
+        emoji = p.get("emoji", "✨")
+        name = p.get("name", "?")
+        refresh = p.get("refresh", "long")
+        cur = int(p.get("current_uses", 0) or 0)
+        mx = int(p.get("max_uses", 1) or 1)
+        charges = "∞" if refresh == "at_will" else f"{cur}/{mx}"
+        refresh_ru = {
+            "short": "кор. отдых",
+            "long": "длин. отдых",
+            "encounter": "за бой",
+            "at_will": "без ограничений",
+        }.get(refresh, refresh)
+        line = f" • {emoji} <b>{name}</b> — {charges} ({refresh_ru})"
+        if p.get("description"):
+            line += f"\n    <i>{p['description']}</i>"
+        dice = p.get("damage_dice") or p.get("heal_dice") or ""
+        if dice:
+            kind = "урон" if p.get("damage_dice") else "лечение"
+            line += f"\n    🎲 {kind}: <code>{dice}</code>"
+        if p.get("save_ability") and p.get("save_dc"):
+            line += f"\n    🛡 сейв: {p['save_ability']} vs DC {p['save_dc']}"
+        lines.append(line)
+    lines.append("")
+    lines.append("<i>/use &lt;название&gt; — активировать способность</i>")
+    return "\n".join(lines)
 
 
 # ─── Passive perception / carrying / attunement / reputation ────────────

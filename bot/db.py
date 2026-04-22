@@ -36,6 +36,15 @@ _SOFT_MIGRATIONS: tuple[str, ...] = (
     "ALTER TABLE characters ADD COLUMN resistances_json TEXT DEFAULT '{\"resist\":[],\"immune\":[],\"vulnerable\":[]}'",
     "ALTER TABLE characters ADD COLUMN hit_dice_remaining INTEGER DEFAULT 1",
     "ALTER TABLE characters ADD COLUMN hit_dice_max INTEGER DEFAULT 1",
+    "ALTER TABLE characters ADD COLUMN powers_json TEXT DEFAULT '[]'",
+    "ALTER TABLE characters ADD COLUMN pending_level_ups INTEGER DEFAULT 0",
+    "ALTER TABLE characters ADD COLUMN pending_levelup_offer_json TEXT DEFAULT ''",
+    "ALTER TABLE npc_state ADD COLUMN is_companion BOOLEAN DEFAULT 0",
+    "ALTER TABLE npc_state ADD COLUMN attack_bonus INTEGER DEFAULT 3",
+    "ALTER TABLE npc_state ADD COLUMN damage_dice VARCHAR(24) DEFAULT '1d6'",
+    "ALTER TABLE npc_state ADD COLUMN damage_type VARCHAR(24) DEFAULT ''",
+    "ALTER TABLE npc_state ADD COLUMN initiative_bonus INTEGER DEFAULT 0",
+    "ALTER TABLE npc_state ADD COLUMN role VARCHAR(120) DEFAULT ''",
 )
 
 

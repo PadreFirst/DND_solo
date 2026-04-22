@@ -76,6 +76,35 @@ _FORMAT_HINT = (
     "  // Для предметов: weight_kg (вес в кг) для расчёта перегруза.\n"
     "  // requires_attunement=true для магических вещей — их бонус включится\n"
     "  // только после /attune.\n"
+    "  // Универсальные способности (spells/Force/gadgets/gags — любое, что\n"
+    "  // имеет заряды). Выдавай ТОЛЬКО когда игрок реально её получил.\n"
+    '  "grant_ability": null,\n'
+    "  // {\n"
+    '  //   "name":"Толчок Силы","emoji":"✨","description":"...",\n'
+    '  //   "max_uses":3,"current_uses":3,"refresh":"short|long|encounter|at_will",\n'
+    '  //   "damage_dice":"2d6","damage_type":"force","heal_dice":"",\n'
+    '  //   "save_ability":"STR","save_dc":13,"tags":["force","push"]\n'
+    "  // }\n"
+    "  // Игрок активирует через /use; ability_use — когда сам LLM описал\n"
+    "  // использование способности в нарративе (редко).\n"
+    '  "ability_use": null,\n'
+    "  // Структурированные квесты (живут в /quests).\n"
+    '  "quest_events": [\n'
+    "    // {\"action\":\"create\",\"title\":\"Найти сестру\",\n"
+    "    //  \"description\":\"...\",\"giver\":\"Риз\",\"is_main\":true,\n"
+    "    //  \"steps\":[{\"key\":\"ask\",\"description\":\"Расспросить в баре\"}],\n"
+    "    //  \"reward_xp\":100,\"reward_gold\":50}\n"
+    "    // {\"action\":\"complete_step\",\"title\":\"Найти сестру\",\n"
+    "    //  \"step_key_completed\":\"ask\"}\n"
+    "    // {\"action\":\"complete\",\"title\":\"Найти сестру\"}\n"
+    "  ],\n"
+    "  // Внутриигровые напарники (не реальные игроки).\n"
+    '  "add_companion": null,\n'
+    "  // {\"name\":\"R2-D8\",\"role\":\"дроид-разведчик\",\n"
+    "  //  \"hp_current\":18,\"hp_max\":18,\"ac\":14,\n"
+    "  //  \"attack_bonus\":3,\"damage_dice\":\"1d6\",\n"
+    "  //  \"initiative_bonus\":2,\"notes\":\"чинит раны в бою\"}\n"
+    '  "remove_companion": ""\n'
     "}\n"
     "ПРАВИЛА:\n"
     "- НИКОГДА не пиши цифры бросков/урона/HP в narrative. Эти блоки собирает код и вставляет ДО нарратива.\n"
@@ -87,6 +116,11 @@ _FORMAT_HINT = (
     "- Combat State Machine: раунды/действие/бонус/реакцию считает код. Не пиши 'твой ход окончен' в narrative — это покажет код.\n"
     "- Торговля: используй trade_offer один раз на встречу с торговцем. Дальше покупку/продажу двигает игрок через /buy и /sell — не меняй инвентарь сам, если игрок не совершил явную сделку.\n"
     "- Крафт: grant_recipe только когда игрок реально получает знание. Сам крафт — через /craft (код спишет компоненты и бросит навык).\n"
+    "- Способности: grant_ability — ТОЛЬКО когда игрок получил новое умение (сюжетно или при level-up). Дальше игрок /use — заряды и броски считает код. НЕ меняй powers сам между ходами.\n"
+    "- Способности ВСЕЛЕННО-НЕЙТРАЛЬНЫЕ: spells, Force, импланты, гаджеты, трюки, песни — любое активное умение с зарядами.\n"
+    "- Квесты: используй quest_events для живого журнала. active_quest_summary оставляй для совместимости, но главное — structured events в quest_events.\n"
+    "- Напарники: add_companion для найма (бот-управляемый NPC), remove_companion при уходе/смерти. Напарники сражаются сами (код крутит инициативу и броски).\n"
+    "- На /levelup игрок выбирает перк в отдельном диалоге — НЕ меняй abilities/HP/powers игрока вручную после level-up, это делает отдельный вызов LLM.\n"
 )
 
 _OPENING_FORMAT_HINT = (
@@ -272,6 +306,80 @@ class GeminiClient:
                 await asyncio.sleep(1 + attempt)
                 log.warning("Gemini world opening retry %s: %s", attempt + 1, e)
         raise RuntimeError(f"Failed to generate world opening: {last_error}")
+
+
+    # ── Level-up perk offer (universe-aware) ──────────────────────────
+
+    async def propose_level_up(self, character, session) -> "LevelUpOffer | None":
+        """Ask the LLM for 3 perk options tailored to the character's
+        universe and concept. Universe-agnostic by construction — works for
+        hobbits, Jedi, gingerbread men, whatever. Returns None on failure so
+        the caller can fall back to the deterministic pool.
+        """
+        from bot.schemas import LevelUpOffer
+        import json as _json
+
+        abilities = {}
+        try:
+            abilities = _json.loads(character.abilities_json or "{}")
+        except Exception:
+            pass
+        try:
+            powers = _json.loads(character.powers_json or "[]")
+        except Exception:
+            powers = []
+
+        prompt = (
+            "LEVEL UP. Игрок только что получил уровень — подбери ему 3 перка "
+            "в духе его вселенной и концепции. Перки должны быть УНИКАЛЬНЫ "
+            "и тематичны: джедаю — сила, хоббиту — смекалка, вжику из "
+            "«Чип и Дейл» — гаджеты, пряничному человечку — сахарные трюки.\n\n"
+            f"Новый уровень: {character.level}\n"
+            f"Раса: {character.race}\n"
+            f"Класс/роль: {character.char_class}\n"
+            f"Вселенная: {session.universe}\n"
+            f"Стиль: {session.narrative_style}\n"
+            f"Характеристики: {abilities}\n"
+            f"Имеющиеся способности: "
+            f"{[p.get('name') for p in powers]}\n\n"
+            "Верни СТРОГО JSON:\n"
+            "{\n"
+            '  "new_level": <int>,\n'
+            '  "flavor": "<короткая реплика ГМ в стиле сеттинга>",\n'
+            '  "perks": [\n'
+            '    {"id":"p1","label":"...","description":"...",\n'
+            '     "effect_type":"stat|hp|proficiency|ability|feature",\n'
+            '     "stat_key":"STR|DEX|CON|INT|WIS|CHA","stat_delta":0,\n'
+            '     "hp_delta":0,"proficiency_name":"",\n'
+            '     "granted_ability":{"name":"","emoji":"","description":"",\n'
+            '       "max_uses":1,"current_uses":1,"refresh":"long|short|encounter|at_will",\n'
+            '       "damage_dice":"","damage_type":"","heal_dice":"","save_ability":"","save_dc":0}\n'
+            '    }\n'
+            "  ]\n"
+            "}\n"
+            "Правила:\n"
+            "- Ровно 3 перка, id = p1/p2/p3\n"
+            "- Хотя бы 1 перк effect_type=ability (новая способность в тему вселенной)\n"
+            "- effect_type=stat → не бустить одну и ту же черту дважды\n"
+            "- Описание короткое, 1-2 предложения, без HTML\n"
+            "- Без markdown, без комментариев, только JSON\n"
+        )
+        try:
+            data = await self._call(
+                prompt=prompt,
+                model=settings.gemini_model,
+                temperature=0.6,
+                max_tokens=1500,
+                response_mime_type="application/json",
+            )
+            text = self._extract_text(data).strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+            raw = _json.loads(text)
+            return LevelUpOffer(**raw)
+        except Exception as e:
+            log.warning("Gemini propose_level_up failed: %s", e)
+            return None
 
 
 def _unwrap_json_string(text: str) -> str:
