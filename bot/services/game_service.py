@@ -292,6 +292,48 @@ class GameService:
         msgs = await self.get_recent_messages(db, user.id, 20)
         abilities = json.loads(ch.abilities_json or "{}")
         recent = "\n".join(f"{m.role.upper()}: {m.content[:400]}" for m in msgs) or "(пусто)"
+
+        # Replay the player's onboarding preferences (tone / rating / pace /
+        # difficulty) into EVERY system prompt so the LLM doesn't drift away
+        # from the chosen vibe after a couple turns. Without this, an "18+
+        # тёмное фэнтези с хардкором" run starts feeling like a 13+ epic
+        # quest by turn 5.
+        prefs_line = ""
+        try:
+            onb = json.loads(gs.onboarding_state_json or "{}")
+        except Exception:
+            onb = {}
+        if isinstance(onb, dict):
+            bits = []
+            if onb.get("tone"):
+                bits.append(f"Тон: {onb['tone']}")
+            if onb.get("rating"):
+                rating = onb["rating"]
+                hint = {
+                    "13": "детям OK, без графического насилия и секса",
+                    "16": "кровь, мрачные темы, мат уместен",
+                    "18": "без цензуры — секс, мат, жесть допустимы если уместно",
+                }.get(str(rating), "")
+                bits.append(f"Рейтинг: {rating}+ ({hint})" if hint else f"Рейтинг: {rating}+")
+            if onb.get("pace"):
+                pace_hint = {
+                    "Быстрый": "короткие описания, экшен в каждом ходе",
+                    "Средний": "баланс между атмосферой и темпом",
+                    "Медленный": "длинные сцены, сенсорные детали, паузы",
+                }
+                pace = onb["pace"].replace("🚀 ", "").replace("⚖ ", "").replace("📜 ", "")
+                bits.append(f"Темп: {pace} ({pace_hint.get(pace, '')})")
+            if onb.get("difficulty"):
+                diff_hint = {
+                    "Лайт": "ГМ помогает игроку, прощает ошибки, смерть = откат",
+                    "Норма": "честные правила, броски решают",
+                    "Хардкор": "жёстко, без подсказок, любая ошибка может стоить персонажа",
+                }
+                diff = onb["difficulty"].replace("🌱 ", "").replace("⚖ ", "").replace("💀 ", "")
+                bits.append(f"Сложность: {diff} ({diff_hint.get(diff, '')})")
+            if bits:
+                prefs_line = "PlayerPreferences (соблюдай в каждом ходе): " + " | ".join(bits) + "\n"
+
         return (
             f"Player: {ch.name} ({ch.race} {ch.char_class}, level {ch.level})\n"
             f"HP: {ch.hp_current}/{ch.hp_max} temp:{ch.temp_hp} AC:{ch.ac} gold:{ch.gold}\n"
@@ -302,6 +344,7 @@ class GameService:
             f"Location Description: {gs.current_location_description}\n"
             f"Quest: {gs.active_quest_summary}\n"
             f"Universe: {gs.universe}; Style: {gs.narrative_style}; Weather:{gs.weather}; Time:{gs.time_of_day}\n"
+            f"{prefs_line}"
             f"Recent Messages:\n{recent}"
         )
 
@@ -423,6 +466,92 @@ class GameService:
             f"♥ HP: {ch.hp_current}/{ch.hp_max} | КД: {ch.ac} | Золото: {ch.gold}\n"
             f"🎒 {items}"
         )
+
+    @staticmethod
+    def format_starter_screen(ch: Character) -> str:
+        """Rich starter card shown ONCE right after onboarding — gives the
+        new player a 5-second scan of who they are and what they can do.
+        Uses Russian stat names (NOT STR/DEX/...) per UX brief: target audience
+        has never seen a D&D character sheet.
+        """
+        ABILITY_FULL_RU = {
+            "STR": ("💪 Сила",         "урон в ближнем бою, ношение тяжестей"),
+            "DEX": ("🤸 Ловкость",     "точность, уворот, скрытность"),
+            "CON": ("🛡 Телосложение", "ХП и стойкость"),
+            "INT": ("🧠 Интеллект",    "знания, расследование, магия"),
+            "WIS": ("👁 Мудрость",     "внимание, выживание, восприятие"),
+            "CHA": ("😎 Харизма",      "убеждение, обман, выступление"),
+        }
+        REFRESH_RU = {
+            "short": "восст. за короткий отдых",
+            "long": "восст. за длинный отдых",
+            "encounter": "восст. после боя",
+            "at_will": "без ограничений",
+        }
+
+        try:
+            abilities = json.loads(ch.abilities_json or "{}")
+        except Exception:
+            abilities = {}
+        try:
+            inv = json.loads(ch.inventory_json or "[]")
+        except Exception:
+            inv = []
+        try:
+            powers = json.loads(ch.powers_json or "[]")
+        except Exception:
+            powers = []
+
+        head = f"═══ ТВОЙ ПЕРСОНАЖ ═══\n<b>{ch.name}</b>"
+        tail = " ".join(x for x in (ch.race, ch.char_class) if x)
+        if tail:
+            head += f", {tail}"
+        head += f", {ch.level} ур.\n"
+        head += f"❤ HP {ch.hp_current}/{ch.hp_max}   🛡 КД {ch.ac}   ⚡ Скорость {ch.speed_m}м"
+
+        stats_lines = ["", "═══ ХАРАКТЕРИСТИКИ ═══"]
+        for key in ("STR", "DEX", "CON", "INT", "WIS", "CHA"):
+            score = int(abilities.get(key, 10) or 10)
+            mod = (score - 10) // 2
+            label, blurb = ABILITY_FULL_RU.get(key, (key, ""))
+            stats_lines.append(f"{label} {score} ({mod:+d}) — <i>{blurb}</i>")
+
+        sections: list[str] = [head, "\n".join(stats_lines)]
+
+        if powers:
+            ab_lines = ["═══ ЧТО ТЫ УМЕЕШЬ ═══"]
+            for p in powers:
+                emoji = p.get("emoji") or "✨"
+                name = p.get("name", "?")
+                refresh = (p.get("refresh") or "long").lower()
+                cur = int(p.get("current_uses", 0) or 0)
+                mx = int(p.get("max_uses", 1) or 1)
+                if refresh == "at_will":
+                    charges = "без ограничений"
+                else:
+                    charges = f"{cur}/{mx} ({REFRESH_RU.get(refresh, refresh)})"
+                ab_lines.append(f"{emoji} <b>{name}</b> — {charges}")
+                if p.get("description"):
+                    ab_lines.append(f"  <i>— {p['description']}</i>")
+            sections.append("\n".join(ab_lines))
+
+        if inv:
+            inv_lines = ["═══ В РЮКЗАКЕ ═══"]
+            for it in inv:
+                inv_lines.append(_format_inventory_item(it, short=False))
+            inv_lines.append(f"💰 Золото: {ch.gold}")
+            sections.append("\n".join(inv_lines))
+
+        hints = (
+            "═══ КАК ИГРАТЬ ═══\n"
+            "• Жми кнопки 1–5 — быстрый выбор готового варианта\n"
+            "• Или просто <b>пиши действия словами</b> — ГМ поймёт\n"
+            "• <code>ГМ: вопрос</code> — задать вопрос правил\n"
+            "• 📋 Меню — карточка, инвентарь, способности, отдых"
+        )
+        sections.append(hints)
+
+        return "\n\n".join(sections)
 
     @staticmethod
     def format_inventory_detailed(ch: Character) -> str:
@@ -549,8 +678,11 @@ class GameService:
         gs.last_options_json = json.dumps(options, ensure_ascii=False)
         gs.turn_number = 1
 
-        char_intro = self.format_character_intro(ch)
-        full_text = f"{char_intro}\n\n---\n\n{narrative}"
+        # Use the rich starter screen (UX brief #1) instead of the cramped
+        # one-liner intro — new players need to see who they are, what they
+        # carry, what they can do, and how to play. ALL Russian, no DEX/STR.
+        starter = self.format_starter_screen(ch)
+        full_text = f"{starter}\n\n━━━━━━━━━━━━━━━━━━\n\n{narrative}"
         await self.save_message(db, user.id, "assistant", narrative)
         return TurnOutput(text=full_text, options=options)
 

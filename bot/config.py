@@ -64,8 +64,8 @@ def load_settings() -> Settings:
     return Settings(
         bot_token=token,
         gemini_api_key=api_key,
-        gemini_model=os.getenv("GEMINI_MODEL", "gemini-1.5-flash-latest"),
-        gemini_model_heavy=os.getenv("GEMINI_MODEL_HEAVY", os.getenv("GEMINI_MODEL", "gemini-1.5-pro-latest")),
+        gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
+        gemini_model_heavy=os.getenv("GEMINI_MODEL_HEAVY", os.getenv("GEMINI_MODEL", "gemini-3.1-pro-preview")),
         gemini_proxy=os.getenv("GEMINI_PROXY", "https://generativelanguage.googleapis.com").rstrip("/"),
         gemini_proxy_token=os.getenv("GEMINI_PROXY_TOKEN", "").strip(),
         database_url=os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./dnd_bot.db"),

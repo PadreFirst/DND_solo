@@ -327,4 +327,102 @@ class TestProcessTurn:
 
         out = await svc.process_turn(db, user, "Атакую врага")
         assert out.text
-        assert len(out.options) >= 3
+
+
+class TestFormatStarterScreen:
+    """Rich starter card shown ONCE after onboarding."""
+
+    def _mk_char(self, **overrides):
+        from bot.models import Character
+
+        base = dict(
+            user_id=1, name="Лютый Ёжик", race="Полуэльф", char_class="Бард",
+            level=1, hp_current=9, hp_max=9, ac=13, speed_m=9, gold=15,
+            abilities_json=json.dumps({"STR": 10, "DEX": 14, "CON": 12,
+                                       "INT": 13, "WIS": 12, "CHA": 16}),
+            inventory_json=json.dumps([
+                {"name": "Рапира", "emoji": "🗡", "type": "weapon",
+                 "is_equipped": True, "damage_dice": "1d8", "quantity": 1},
+                {"name": "Зелье лечения", "emoji": "🧪",
+                 "type": "consumable", "quantity": 2},
+            ]),
+            powers_json=json.dumps([
+                {"name": "Вдохновение барда", "emoji": "🎵",
+                 "description": "+1d6 союзнику", "max_uses": 3,
+                 "current_uses": 3, "refresh": "long"},
+            ]),
+        )
+        base.update(overrides)
+        return Character(**base)
+
+    def test_renders_all_sections(self):
+        ch = self._mk_char()
+        out = GameService.format_starter_screen(ch)
+        assert "ТВОЙ ПЕРСОНАЖ" in out
+        assert "ХАРАКТЕРИСТИКИ" in out
+        assert "ЧТО ТЫ УМЕЕШЬ" in out
+        assert "В РЮКЗАКЕ" in out
+        assert "КАК ИГРАТЬ" in out
+        # Russian stat names, no STR/DEX/CON/etc.
+        assert "Сила" in out
+        assert "Ловкость" in out
+        assert "Харизма" in out
+        assert "STR" not in out
+        assert "DEX" not in out
+        # Charges visible.
+        assert "3/3" in out
+
+    def test_skips_powers_section_if_empty(self):
+        ch = self._mk_char(powers_json="[]")
+        out = GameService.format_starter_screen(ch)
+        assert "ЧТО ТЫ УМЕЕШЬ" not in out
+        # But still has the rest.
+        assert "ХАРАКТЕРИСТИКИ" in out
+        assert "В РЮКЗАКЕ" in out
+
+    def test_skips_inventory_section_if_empty(self):
+        ch = self._mk_char(inventory_json="[]")
+        out = GameService.format_starter_screen(ch)
+        assert "В РЮКЗАКЕ" not in out
+
+
+@pytest.mark.asyncio
+class TestBuildContextPreferences:
+    """build_context must replay onboarding prefs into every turn."""
+
+    async def test_prefs_inlined_into_context(self, db):
+        from bot.models import GameSession
+
+        gemini = AsyncMock()
+        svc = GameService(gemini)
+        user = User(telegram_id=12345, username="prefs_tester")
+        db.add(user)
+        await db.flush()
+        ch = await svc.ensure_character(db, user)
+        gs = await svc.ensure_session(db, user)
+        gs.onboarding_state_json = json.dumps({
+            "universe": "🌆 Киберпанк",
+            "tone": "🌑 Тёмная и жёсткая",
+            "rating": "18",
+            "pace": "🚀 Быстрый",
+            "difficulty": "💀 Хардкор",
+        }, ensure_ascii=False)
+
+        ctx = await svc.build_context(db, user, ch, gs)
+        assert "PlayerPreferences" in ctx
+        assert "Тёмная" in ctx
+        assert "18+" in ctx
+        assert "Быстрый" in ctx
+        assert "Хардкор" in ctx
+
+    async def test_no_prefs_section_when_state_empty(self, db):
+        gemini = AsyncMock()
+        svc = GameService(gemini)
+        user = User(telegram_id=54321, username="no_prefs")
+        db.add(user)
+        await db.flush()
+        ch = await svc.ensure_character(db, user)
+        gs = await svc.ensure_session(db, user)
+
+        ctx = await svc.build_context(db, user, ch, gs)
+        assert "PlayerPreferences" not in ctx

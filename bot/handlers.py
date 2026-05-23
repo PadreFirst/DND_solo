@@ -50,7 +50,10 @@ async def typing_status(bot, chat_id):
 
 def _render_options_block(options: list[str]) -> str:
     rows = [f"{idx}) {opt}" for idx, opt in enumerate(options, start=1)]
-    return "Варианты действий:\n" + "\n".join(rows)
+    # Surface the free-text escape hatch — easy to miss when the buttons feel
+    # like the only path forward (UX brief #2.4).
+    hint = "\n\n<i>…или просто опиши своё действие словами.</i>"
+    return "Варианты действий:\n" + "\n".join(rows) + hint
 
 
 def _compose_turn_message(text: str, options: list[str]) -> str:
@@ -617,154 +620,250 @@ async def cmd_unattune(message: Message, game: GameService, db: AsyncSession) ->
 
 # ── Guided onboarding wizard ─────────────────────────────────────────
 #
-# Kept simple: a small 3-step wizard backed by the user's existing
-# GameSession.last_options_json as transient state storage. We avoid
-# importing aiogram.fsm to stay drop-in compatible with the current
-# middleware. Steps: universe → style → concept text → initialize_story.
+# Six-step wizard: universe → tone → rating → pace → difficulty → concept text.
+# State lives in gs.onboarding_state_json as a dict and is kept around AFTER
+# initialize_story so build_context can replay the player's tone/rating/pace
+# preferences into every system prompt. Without this the LLM forgets the
+# vibe by turn 3 and drifts toward generic epic-fantasy prose.
+
+_TOTAL_STEPS = 6
 
 _UNIVERSES = [
-    ("fantasy", "🏰 Фэнтези"),
+    ("fantasy", "🏰 Классическое фэнтези"),
+    ("dark_fantasy", "🩸 Тёмное фэнтези"),
     ("cyberpunk", "🌆 Киберпанк"),
     ("postapoc", "☢ Постапокалипсис"),
     ("space", "🚀 Космоопера"),
+    ("starwars", "🛸 Звёздные войны"),
     ("horror", "👻 Хоррор"),
     ("noir", "🕵 Нуар-детектив"),
+    ("lotr", "💍 Властелин Колец"),
+    ("hp", "🪄 Гарри Поттер"),
 ]
-_STYLES = [
-    ("serious", "Серьёзный"),
-    ("dark", "Мрачный"),
-    ("humor", "С юмором"),
-    ("epic", "Эпический"),
-    ("gritty", "Жёсткий"),
+_TONES = [
+    ("epic", "🦸 Эпическая"),
+    ("serious", "🗡 Серьёзная"),
+    ("dark", "🌑 Тёмная и жёсткая"),
+    ("humor", "🍻 Лёгкая с юмором"),
+    ("noir", "🎲 Гритти-нуар"),
+]
+_RATINGS = [
+    ("13", "13+ — приключения и битвы"),
+    ("16", "16+ — кровь, мрачные темы"),
+    ("18", "18+ — без цензуры"),
+]
+_PACES = [
+    ("fast", "🚀 Быстрый"),
+    ("medium", "⚖ Средний"),
+    ("slow", "📜 Медленный"),
+]
+_DIFFICULTIES = [
+    ("light", "🌱 Лайт"),
+    ("normal", "⚖ Норма"),
+    ("hardcore", "💀 Хардкор"),
 ]
 
 
-def _onboarding_kb_universes():
+def _label_for(table, key):
+    return next((lbl for k, lbl in table if k == key), key or "—")
+
+
+def _onboarding_kb(step_code: str, table, cols: int = 1):
+    """Build a keyboard for a given wizard step. callback_data:
+    `onb:<step_code>:<value_key>`. Always appends Back + Skip(default) buttons.
+    """
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
     rows = []
-    for i in range(0, len(_UNIVERSES), 2):
-        row = _UNIVERSES[i:i + 2]
+    for i in range(0, len(table), cols):
+        chunk = table[i:i + cols]
         rows.append([
-            InlineKeyboardButton(text=label, callback_data=f"onb:uni:{key}")
-            for key, label in row
+            InlineKeyboardButton(text=label, callback_data=f"onb:{step_code}:{key}")
+            for key, label in chunk
         ])
+    rows.append([
+        InlineKeyboardButton(text="⏭ Пропустить", callback_data=f"onb:{step_code}:_skip"),
+        InlineKeyboardButton(text="⬅ Назад", callback_data="onb:back"),
+    ])
     rows.append([InlineKeyboardButton(text="❌ Отмена", callback_data="onb:cancel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _onboarding_kb_styles(universe_key: str):
-    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-    rows = []
-    for i in range(0, len(_STYLES), 2):
-        row = _STYLES[i:i + 2]
-        rows.append([
-            InlineKeyboardButton(text=label, callback_data=f"onb:sty:{universe_key}:{key}")
-            for key, label in row
-        ])
-    rows.append([InlineKeyboardButton(text="⬅ Назад", callback_data="onb:restart")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+_STEP_ORDER = ["uni", "ton", "rat", "pac", "dif", "concept"]
+_STEP_TITLES = {
+    "uni":     ("🌍 В каком мире играем?",           _UNIVERSES,    2),
+    "ton":     ("🎭 Какая атмосфера?",                _TONES,        1),
+    "rat":     ("🔞 Уровень контента?",               _RATINGS,      1),
+    "pac":     ("⏱ Темп игры?",                       _PACES,        3),
+    "dif":     ("🎯 Сложность?",                      _DIFFICULTIES, 3),
+}
+_STEP_FIELDS = {
+    "uni": ("universe", "universe_key"),
+    "ton": ("tone", "tone_key"),
+    "rat": ("rating", "rating_key"),
+    "pac": ("pace", "pace_key"),
+    "dif": ("difficulty", "difficulty_key"),
+}
+_STEP_TABLES = {
+    "uni": _UNIVERSES, "ton": _TONES, "rat": _RATINGS,
+    "pac": _PACES, "dif": _DIFFICULTIES,
+}
+
+
+def _wizard_header(step_idx: int, state: dict) -> str:
+    """Render `🎲 Шаг N из M` + a compact summary of the picks so far."""
+    head = f"🎲 <b>Визард новой игры</b> — шаг {step_idx + 1} из {_TOTAL_STEPS}"
+    picks = []
+    for k in _STEP_ORDER[:step_idx]:
+        if k == "concept":
+            break
+        label_field, _ = _STEP_FIELDS[k]
+        val = state.get(label_field)
+        if val:
+            picks.append(f"• {val}")
+    if picks:
+        head += "\n\n<i>" + "\n".join(picks) + "</i>"
+    return head
+
+
+async def _send_step(target, step_code: str, state: dict, *, edit: bool = True):
+    """Render a wizard step. `target` is the Message to send/edit."""
+    if step_code == "concept":
+        await _send_concept_prompt(target, state, edit=edit)
+        return
+    title, table, cols = _STEP_TITLES[step_code]
+    step_idx = _STEP_ORDER.index(step_code)
+    body = f"{_wizard_header(step_idx, state)}\n\n{title}"
+    kb = _onboarding_kb(step_code, table, cols=cols)
+    if edit:
+        try:
+            await target.edit_text(body, reply_markup=kb, parse_mode="HTML")
+            return
+        except Exception:
+            pass
+    await target.answer(body, reply_markup=kb, parse_mode="HTML")
+
+
+async def _send_concept_prompt(target, state: dict, *, edit: bool = True):
+    body = (
+        f"{_wizard_header(_STEP_ORDER.index('concept'), state)}\n\n"
+        f"📖 Теперь расскажи о персонаже <b>одним сообщением</b>: "
+        f"кто он, откуда, что его ведёт.\n\n"
+        f"<i>Примеры:</i>\n"
+        f" • <i>«Нетраннер-соло, ищет пропавшую сестру в Найт-Сити»</i>\n"
+        f" • <i>«Бард-бродяга, проигравший фамильную лютню в карты»</i>\n"
+        f" • <i>«Бывший имперский следователь, охотится за артефактом»</i>\n\n"
+        f"<i>Или короче — пара слов тоже сойдёт, ГМ дофантазирует.</i>"
+    )
+    if edit:
+        try:
+            await target.edit_text(body, parse_mode="HTML")
+            return
+        except Exception:
+            pass
+    await target.answer(body, parse_mode="HTML")
+
+
+async def _load_state(gs) -> dict:
+    raw = (gs.onboarding_state_json or "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+async def _save_state(gs, state: dict) -> None:
+    gs.onboarding_state_json = json.dumps(state, ensure_ascii=False)
+
+
+async def _start_wizard(target, game: GameService, db: AsyncSession, user_obj):
+    user = await game.get_or_create_user(db, user_obj.id, user_obj.username)
+    gs = await game.ensure_session(db, user)
+    await _save_state(gs, {"step_code": "uni"})
+    gs.turn_number = 0
+    gs.last_options_json = "[]"
+    await _send_step(target, "uni", {}, edit=False)
 
 
 @router.message(Command("onboarding"))
-async def cmd_onboarding(message: Message) -> None:
-    await message.answer(
-        "🎲 <b>Визард новой игры</b> — шаг 1 из 3\n\n"
-        "Выбери вселенную:",
-        reply_markup=_onboarding_kb_universes(),
-        parse_mode="HTML",
-    )
+async def cmd_onboarding(message: Message, game: GameService, db: AsyncSession) -> None:
+    await _start_wizard(message, game, db, message.from_user)
 
 
 @router.callback_query(F.data == "menu:onboarding")
-async def on_menu_onboarding(cb: CallbackQuery) -> None:
+async def on_menu_onboarding(cb: CallbackQuery, game: GameService, db: AsyncSession) -> None:
     await cb.answer()
-    await cb.message.answer(
-        "🎲 <b>Визард новой игры</b> — шаг 1 из 3\n\nВыбери вселенную:",
-        reply_markup=_onboarding_kb_universes(),
-        parse_mode="HTML",
-    )
+    await _start_wizard(cb.message, game, db, cb.from_user)
 
 
-@router.callback_query(F.data == "onb:restart")
-async def on_onboarding_restart(cb: CallbackQuery) -> None:
+@router.callback_query(F.data == "onb:back")
+async def on_onboarding_back(cb: CallbackQuery, game: GameService, db: AsyncSession) -> None:
     await cb.answer()
-    try:
-        await cb.message.edit_text(
-            "🎲 <b>Визард новой игры</b> — шаг 1 из 3\n\nВыбери вселенную:",
-            reply_markup=_onboarding_kb_universes(),
-            parse_mode="HTML",
-        )
-    except Exception:
-        await cb.message.answer(
-            "🎲 <b>Визард новой игры</b> — шаг 1 из 3\n\nВыбери вселенную:",
-            reply_markup=_onboarding_kb_universes(),
-            parse_mode="HTML",
-        )
+    user = await game.get_or_create_user(db, cb.from_user.id, cb.from_user.username)
+    gs = await game.ensure_session(db, user)
+    state = await _load_state(gs)
+    cur = state.get("step_code", "uni")
+    if cur in _STEP_ORDER:
+        idx = max(0, _STEP_ORDER.index(cur) - 1)
+    else:
+        idx = 0
+    new_step = _STEP_ORDER[idx]
+    # Clear the field for the step we're going back to so the player can re-pick.
+    if new_step in _STEP_FIELDS:
+        label_field, key_field = _STEP_FIELDS[new_step]
+        state.pop(label_field, None)
+        state.pop(key_field, None)
+    state["step_code"] = new_step
+    await _save_state(gs, state)
+    await _send_step(cb.message, new_step, state, edit=True)
 
 
 @router.callback_query(F.data == "onb:cancel")
-async def on_onboarding_cancel(cb: CallbackQuery) -> None:
+async def on_onboarding_cancel(cb: CallbackQuery, game: GameService, db: AsyncSession) -> None:
     await cb.answer("Отменено.")
+    user = await game.get_or_create_user(db, cb.from_user.id, cb.from_user.username)
+    gs = await game.ensure_session(db, user)
+    gs.onboarding_state_json = ""
     try:
-        await cb.message.edit_text("Визард отменён. Можешь описать героя одним сообщением или снова /onboarding.")
+        await cb.message.edit_text(
+            "Визард отменён. Опиши героя одним сообщением или снова /onboarding."
+        )
     except Exception:
         pass
 
 
-@router.callback_query(F.data.startswith("onb:uni:"))
-async def on_onboarding_universe(cb: CallbackQuery) -> None:
-    await cb.answer()
-    key = cb.data.split(":")[-1]
-    label = next((lbl for k, lbl in _UNIVERSES if k == key), key)
-    try:
-        await cb.message.edit_text(
-            f"🎲 <b>Визард</b> — шаг 2 из 3\n\n"
-            f"Вселенная: <b>{label}</b>\n\nТеперь выбери стиль повествования:",
-            reply_markup=_onboarding_kb_styles(key),
-            parse_mode="HTML",
-        )
-    except Exception:
-        await cb.message.answer(
-            f"🎲 <b>Визард</b> — шаг 2 из 3\n\nВселенная: <b>{label}</b>\nСтиль:",
-            reply_markup=_onboarding_kb_styles(key),
-            parse_mode="HTML",
-        )
-
-
-@router.callback_query(F.data.startswith("onb:sty:"))
-async def on_onboarding_style(
+@router.callback_query(F.data.regexp(r"^onb:(uni|ton|rat|pac|dif):"))
+async def on_onboarding_pick(
     cb: CallbackQuery, game: GameService, db: AsyncSession,
 ) -> None:
-    _, _, uni_key, sty_key = cb.data.split(":")
-    uni_label = next((lbl for k, lbl in _UNIVERSES if k == uni_key), uni_key)
-    sty_label = next((lbl for k, lbl in _STYLES if k == sty_key), sty_key)
+    """Generic step handler: writes the chosen value into state, advances to
+    the next step. Value of `_skip` keeps the default unset.
+    """
+    await cb.answer()
+    parts = cb.data.split(":", 2)
+    if len(parts) != 3:
+        return
+    _, step_code, value_key = parts
+    if step_code not in _STEP_FIELDS:
+        return
 
     user = await game.get_or_create_user(db, cb.from_user.id, cb.from_user.username)
     gs = await game.ensure_session(db, user)
-    # Stash wizard answers in a dedicated column so they don't collide with
-    # player-facing option lists. Cleared by `on_text` right after the
-    # player sends their character concept.
-    gs.onboarding_state_json = json.dumps({
-        "universe": uni_label, "universe_key": uni_key,
-        "style": sty_label, "style_key": sty_key,
-    }, ensure_ascii=False)
-    gs.turn_number = 0  # force initialize_story on the next text
-    gs.last_options_json = "[]"
+    state = await _load_state(gs)
 
-    await cb.answer()
-    try:
-        await cb.message.edit_text(
-            f"🎲 <b>Визард</b> — шаг 3 из 3\n\n"
-            f"Вселенная: <b>{uni_label}</b>\n"
-            f"Стиль: <b>{sty_label}</b>\n\n"
-            f"Теперь опиши персонажа <b>одним сообщением</b>: кто он, чем занимается, что его ведёт.\n"
-            f"Примеры:\n"
-            f" • <i>«Нетраннер-соло, ищет пропавшую сестру»</i>\n"
-            f" • <i>«Бывший паладин, отрёкшийся от ордена»</i>",
-            parse_mode="HTML",
-        )
-    except Exception:
-        await cb.message.answer("Теперь опиши персонажа одним сообщением.", parse_mode="HTML")
+    if value_key != "_skip":
+        label = _label_for(_STEP_TABLES[step_code], value_key)
+        label_field, key_field = _STEP_FIELDS[step_code]
+        state[label_field] = label
+        state[key_field] = value_key
+
+    cur_idx = _STEP_ORDER.index(step_code)
+    next_step = _STEP_ORDER[cur_idx + 1] if cur_idx + 1 < len(_STEP_ORDER) else "concept"
+    state["step_code"] = next_step
+    await _save_state(gs, state)
+    await _send_step(cb.message, next_step, state, edit=True)
 
 
 @router.message(Command("help"))
@@ -807,8 +906,11 @@ async def on_text(message: Message, game: GameService, db: AsyncSession) -> None
 
     if gs.turn_number == 0:
         # If the guided wizard was used, onboarding_state_json holds the
-        # universe + style choices. Prepend them to the concept so
-        # `initialize_story` and the LLM see the intended setting.
+        # universe + tone + rating + pace + difficulty picks. Build a rich
+        # concept block so initialize_story passes them all to the LLM.
+        # KEEP the state around afterwards (just drop the step_code) so
+        # build_context can replay tone/rating/pace into EVERY system
+        # prompt — without that the LLM forgets the vibe by turn 3.
         concept = text
         onb_raw = (gs.onboarding_state_json or "").strip()
         if onb_raw:
@@ -817,12 +919,22 @@ async def on_text(message: Message, game: GameService, db: AsyncSession) -> None
             except Exception:
                 onb = {}
             if isinstance(onb, dict) and onb:
-                concept = (
-                    f"Вселенная: {onb.get('universe', '')}. "
-                    f"Стиль: {onb.get('style', '')}. "
-                    f"Персонаж: {text}"
-                )
-            gs.onboarding_state_json = ""
+                bits = []
+                if onb.get("universe"):
+                    bits.append(f"Вселенная: {onb['universe']}")
+                if onb.get("tone"):
+                    bits.append(f"Тональность: {onb['tone']}")
+                if onb.get("rating"):
+                    bits.append(f"Рейтинг: {onb['rating']}+")
+                if onb.get("pace"):
+                    bits.append(f"Темп: {onb['pace']}")
+                if onb.get("difficulty"):
+                    bits.append(f"Сложность: {onb['difficulty']}")
+                if bits:
+                    concept = " | ".join(bits) + f"\nПерсонаж: {text}"
+                # Drop transient wizard cursor but keep prefs alive.
+                onb.pop("step_code", None)
+                gs.onboarding_state_json = json.dumps(onb, ensure_ascii=False)
         async with typing_status(message.bot, message.chat.id):
             out = await game.initialize_story(db, user, concept)
         await message.answer(

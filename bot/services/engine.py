@@ -150,10 +150,15 @@ class RichRoll:
     def format(self, *, kind: str = "Проверка") -> str:
         parts: list[str] = []
 
+        # Detect natural 20 / natural 1 on the chosen d20 — crit/fumble are
+        # the most emotional moments in TRPG so we flair them visually.
+        chosen_d20 = self.d20
+        if self.d20_alt is not None:
+            chosen_d20 = max(self.d20, self.d20_alt) if self.advantage else min(self.d20, self.d20_alt)
+
         if self.d20_alt is not None:
             tag = "преим." if self.advantage else "помеха"
-            chosen = max(self.d20, self.d20_alt) if self.advantage else min(self.d20, self.d20_alt)
-            parts.append(f"d20[{self.d20},{self.d20_alt}]→{chosen} ({tag})")
+            parts.append(f"d20[{self.d20},{self.d20_alt}]→{chosen_d20} ({tag})")
         else:
             parts.append(f"d20={self.d20}")
 
@@ -170,8 +175,18 @@ class RichRoll:
         result = "Успех" if self.success else "Провал"
         if kind == "Атака":
             result = "Попадание" if self.success else "Промах"
+        # Crit/fumble override the result label — natural 1/20 are special.
+        crit_prefix = ""
+        if chosen_d20 == 20:
+            crit_prefix = "💥 КРИТ! "
+            if kind == "Атака":
+                result = "КРИТИЧЕСКОЕ ПОПАДАНИЕ"
+        elif chosen_d20 == 1:
+            crit_prefix = "💀 ФУМБЛ! "
+            if kind == "Атака":
+                result = "КРИТИЧЕСКИЙ ПРОМАХ"
 
-        out = f"🎲 {kind} {self.label}: {', '.join(parts)} → {self.total} vs {dc_label} {self.dc} — {result}"
+        out = f"🎲 {crit_prefix}{kind} {self.label}: {', '.join(parts)} → {self.total} vs {dc_label} {self.dc} — {result}"
         if self.reasons:
             out += f"  [{', '.join(self.reasons)}]"
         return out
