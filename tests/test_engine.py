@@ -81,9 +81,9 @@ class TestSkillCheck:
         rr = make_skill_check(ch, "атлетика", dc=12)
         text = rr.format(kind="Проверка")
         assert "Проверка" in text
-        assert "d20=" in text
-        assert "Сил" in text
-        assert "мастерство" in text
+        assert "d20:" in text
+        assert "Сила" in text
+        assert "Мастерство" in text
         assert "DC 12" in text
 
 
@@ -176,7 +176,18 @@ class TestRichRollFormat:
             total=17, dc=12, success=True,
         )
         text = rr.format(kind="Проверка")
-        assert text == "🎲 Проверка Внимательность: d20=14, Мдр +1, мастерство +2 → 17 vs DC 12 — Успех"
+        # Multi-line breakdown — header, d20, ability, proficiency, total.
+        assert "Проверка: Внимательность" in text
+        assert "d20:" in text
+        assert "14" in text
+        assert "Мудрость" in text
+        assert "+1" in text
+        assert "Мастерство" in text
+        assert "+2" in text
+        assert "17" in text and "DC 12" in text
+        assert "Успех" in text
+        # Margin display — 17 vs DC 12 = on 5 more.
+        assert "на 5 больше" in text
 
     def test_attack_format(self):
         rr = RichRoll(
@@ -188,7 +199,7 @@ class TestRichRollFormat:
         text = rr.format(kind="Атака")
         assert "Попадание" in text
         assert "КД 14" in text
-        assert "Сил +3" in text
+        assert "Сила" in text and "+3" in text
 
     def test_advantage_format(self):
         rr = RichRoll(
@@ -198,8 +209,8 @@ class TestRichRollFormat:
             total=16, dc=15, success=True,
         )
         text = rr.format(kind="Проверка")
-        assert "преим." in text
-        assert "[14,8]→14" in text
+        assert "преимущество" in text
+        assert "14" in text and "8" in text
 
     def test_negative_mod(self):
         rr = RichRoll(
@@ -209,8 +220,10 @@ class TestRichRollFormat:
             total=9, dc=12, success=False,
         )
         text = rr.format(kind="Проверка")
-        assert "Хар -1" in text
+        assert "Харизма" in text and "-1" in text
         assert "Провал" in text
+        # Margin on failure should show what was missing.
+        assert "не хватило" in text
 
     def test_zero_mod(self):
         rr = RichRoll(
@@ -220,4 +233,86 @@ class TestRichRollFormat:
             total=10, dc=10, success=True,
         )
         text = rr.format(kind="Проверка")
-        assert "Инт +0" in text
+        assert "Интеллект" in text and "+0" in text
+
+    def test_crit_attack_format(self):
+        """Natural 20 on an attack must show a big visual CRIT marker."""
+        rr = RichRoll(
+            label="меч", d20=20, d20_alt=None,
+            advantage=False, disadvantage=False,
+            ability_key="STR", ability_mod_value=3, proficiency_value=2,
+            total=25, dc=13, success=True,
+        )
+        text = rr.format(kind="Атака")
+        assert "КРИТ" in text
+        assert "💥" in text
+        assert "КРИТИЧЕСКОЕ ПОПАДАНИЕ" in text
+
+    def test_fumble_check_format(self):
+        """Natural 1 on a skill check shows fumble marker."""
+        rr = RichRoll(
+            label="Скрытность", d20=1, d20_alt=None,
+            advantage=False, disadvantage=False,
+            ability_key="DEX", ability_mod_value=2, proficiency_value=0,
+            total=3, dc=12, success=False,
+        )
+        text = rr.format(kind="Проверка")
+        assert "ФУМБЛ" in text
+        assert "💀" in text
+
+
+class TestHpBar:
+    def test_full_hp(self):
+        from bot.services.engine import hp_bar
+        bar = hp_bar(10, 10, width=10)
+        assert "10/10" in bar
+        assert "▰" * 10 in bar
+        assert "▱" not in bar
+
+    def test_half_hp(self):
+        from bot.services.engine import hp_bar
+        bar = hp_bar(5, 10, width=10)
+        assert "5/10" in bar
+        assert "▰" * 5 in bar
+        assert "▱" * 5 in bar
+
+    def test_zero_hp(self):
+        from bot.services.engine import hp_bar
+        bar = hp_bar(0, 10, width=10)
+        assert "0/10" in bar
+        assert "▱" * 10 in bar
+
+
+class TestDamageBreakdown:
+    def test_renders_dice_mod_total(self):
+        from bot.services.engine import format_damage_breakdown
+        out = format_damage_breakdown(
+            "1d8+2", rolls=[6], flat_mod=2, total=8,
+            critical=False, damage_type="slashing", ability_label="Сила",
+        )
+        assert "Урон" in out
+        assert "1d8" in out
+        assert "[6]" in out
+        assert "Сила" in out
+        assert "+2" in out
+        assert "8" in out
+        assert "🗡" in out  # slashing emoji
+        assert "рубящий" in out
+
+    def test_crit_marker(self):
+        from bot.services.engine import format_damage_breakdown
+        out = format_damage_breakdown(
+            "1d8+2", rolls=[6, 4], flat_mod=2, total=12,
+            critical=True, damage_type="piercing", ability_label="Ловкость",
+        )
+        assert "крит" in out.lower() or "💥" in out
+
+    def test_damage_type_emoji_known(self):
+        from bot.services.engine import format_damage_type
+        assert format_damage_type("fire").startswith("🔥")
+        assert "огонь" in format_damage_type("fire")
+
+    def test_damage_type_unknown(self):
+        from bot.services.engine import format_damage_type
+        assert format_damage_type("") == ""
+        assert "psychic_blast" in format_damage_type("psychic_blast")

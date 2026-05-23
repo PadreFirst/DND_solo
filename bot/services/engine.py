@@ -30,9 +30,46 @@ SKILL_TO_ABILITY = {
 }
 
 ABILITY_RU = {
-    "STR": "Сил", "DEX": "Лов", "CON": "Тел",
-    "INT": "Инт", "WIS": "Мдр", "CHA": "Хар",
+    "STR": "Сила", "DEX": "Ловкость", "CON": "Телосложение",
+    "INT": "Интеллект", "WIS": "Мудрость", "CHA": "Харизма",
 }
+
+# Damage-type emoji + Russian noun. Surfaces *visually* what kind of hit it
+# was — fire bolt feels different from a sword cut, players read at a glance.
+DAMAGE_TYPE_RU = {
+    "slashing":    ("🗡", "рубящий"),
+    "piercing":    ("🏹", "колющий"),
+    "bludgeoning": ("🔨", "дробящий"),
+    "fire":        ("🔥", "огонь"),
+    "cold":        ("❄", "холод"),
+    "lightning":   ("⚡", "электричество"),
+    "thunder":     ("💥", "звук"),
+    "acid":        ("🧪", "кислота"),
+    "poison":      ("☠", "яд"),
+    "radiant":     ("✨", "свет"),
+    "necrotic":    ("💀", "некротика"),
+    "psychic":     ("🧠", "психика"),
+    "force":       ("💠", "силовая"),
+}
+
+
+def format_damage_type(dtype: str) -> str:
+    """`"fire"` → `"🔥 огонь"`. Empty string when no type was supplied."""
+    if not dtype:
+        return ""
+    emoji, label = DAMAGE_TYPE_RU.get(dtype.strip().lower(), ("", dtype))
+    return f"{emoji} {label}".strip()
+
+
+def hp_bar(current: int, maximum: int, width: int = 10) -> str:
+    """Render a chunky text HP bar like `▰▰▰▰▰▰▱▱▱▱ 6/10`. Used everywhere
+    HP changes so the player gets a visual cue instead of just numbers.
+    """
+    cur = max(0, int(current or 0))
+    mx  = max(1, int(maximum or 0))
+    cur = min(cur, mx)
+    filled = round(width * cur / mx)
+    return "▰" * filled + "▱" * (width - filled) + f" {cur}/{mx}"
 
 # Conditions that impose disadvantage on the character's OWN rolls. Mapped to
 # the roll kind they affect. This is the "code enforces what the TZ promised".
@@ -148,48 +185,89 @@ class RichRoll:
     reasons: list[str] = field(default_factory=list)
 
     def format(self, *, kind: str = "Проверка") -> str:
-        parts: list[str] = []
+        """Render a roll as a chat-ready multi-line breakdown.
 
-        # Detect natural 20 / natural 1 on the chosen d20 — crit/fumble are
-        # the most emotional moments in TRPG so we flair them visually.
+        Goal: the player can SEE every input that went into the result —
+        which die was rolled, which stat added what, where the proficiency
+        came from, what bent the odds (advantage/poison/weather), and how
+        far above/below the DC the final total landed.
+
+        Layout:
+            🎲 <b>{kind}: {label}</b>
+            ┌ d20: <b>{chosen}</b> ({tag, if adv/dis})
+            ├ {Ability name}: {+/-N}
+            ├ Мастерство: {+/-N}
+            ├ {reason}                       ← e.g. poisoned, fog, rep +1
+            └ Итого: <b>{total}</b> vs DC/КД {dc} → ✅ <b>Успех</b> (на N)
+
+        On nat-20 / nat-1 the header swaps in 💥 КРИТ / 💀 ФУМБЛ.
+        """
+        # Pick the actual d20 we resolved on (handles adv/dis).
         chosen_d20 = self.d20
         if self.d20_alt is not None:
             chosen_d20 = max(self.d20, self.d20_alt) if self.advantage else min(self.d20, self.d20_alt)
 
+        is_crit  = chosen_d20 == 20
+        is_fumble = chosen_d20 == 1
+
+        # Header — flair crit/fumble loudly so they're impossible to miss.
+        if is_crit:
+            header = f"💥 <b>КРИТ! {kind}: {self.label}</b>"
+        elif is_fumble:
+            header = f"💀 <b>ФУМБЛ! {kind}: {self.label}</b>"
+        else:
+            header = f"🎲 <b>{kind}: {self.label}</b>"
+
+        lines: list[str] = [header]
+
+        # d20 line — show both dice when adv/dis, then which one was kept.
         if self.d20_alt is not None:
-            tag = "преим." if self.advantage else "помеха"
-            parts.append(f"d20[{self.d20},{self.d20_alt}]→{chosen_d20} ({tag})")
+            tag = "преимущество" if self.advantage else "помеха"
+            other = self.d20_alt if chosen_d20 == self.d20 else self.d20
+            lines.append(
+                f"┌ d20: <b>{chosen_d20}</b> "
+                f"(второй кубик {other}, {tag})"
+            )
         else:
-            parts.append(f"d20={self.d20}")
+            lines.append(f"┌ d20: <b>{chosen_d20}</b>")
 
-        ab_short = ABILITY_RU.get(self.ability_key, self.ability_key)
-        if self.ability_mod_value != 0:
-            parts.append(f"{ab_short} {self.ability_mod_value:+d}")
-        else:
-            parts.append(f"{ab_short} +0")
+        # Named ability modifier. Always show, even at +0 — players need to
+        # see WHY their attack got +0 and not a magic +3.
+        ab_full = ABILITY_RU.get(self.ability_key, self.ability_key)
+        lines.append(f"├ {ab_full}: <b>{self.ability_mod_value:+d}</b>")
 
+        # Proficiency contribution. proficiency_value can include rep mod —
+        # we keep it as-is rather than splitting (rep is shown via reasons).
         if self.proficiency_value:
-            parts.append(f"мастерство {self.proficiency_value:+d}")
+            lines.append(f"├ Мастерство: <b>{self.proficiency_value:+d}</b>")
 
+        # Reasons (poison, fog, encumbered, reputation…) get a sub-line each
+        # so the player understands EXACTLY why the odds moved.
+        for r in self.reasons:
+            lines.append(f"├ <i>{r}</i>")
+
+        # Bottom line — total vs DC + margin so "scraped by" vs "crushed it"
+        # is visible at a glance.
         dc_label = "КД" if kind == "Атака" else "DC"
-        result = "Успех" if self.success else "Провал"
-        if kind == "Атака":
-            result = "Попадание" if self.success else "Промах"
-        # Crit/fumble override the result label — natural 1/20 are special.
-        crit_prefix = ""
-        if chosen_d20 == 20:
-            crit_prefix = "💥 КРИТ! "
-            if kind == "Атака":
-                result = "КРИТИЧЕСКОЕ ПОПАДАНИЕ"
-        elif chosen_d20 == 1:
-            crit_prefix = "💀 ФУМБЛ! "
-            if kind == "Атака":
-                result = "КРИТИЧЕСКИЙ ПРОМАХ"
+        margin = self.total - self.dc
+        if is_crit and kind == "Атака":
+            verdict, icon = "КРИТИЧЕСКОЕ ПОПАДАНИЕ", "💥"
+        elif is_fumble and kind == "Атака":
+            verdict, icon = "КРИТИЧЕСКИЙ ПРОМАХ", "💀"
+        elif kind == "Атака":
+            verdict, icon = ("Попадание", "✅") if self.success else ("Промах", "❌")
+        else:
+            verdict, icon = ("Успех", "✅") if self.success else ("Провал", "❌")
+        if self.success:
+            margin_str = f" (на {abs(margin)} больше)" if margin > 0 else ""
+        else:
+            margin_str = f" (не хватило {abs(margin) + 1})"
 
-        out = f"🎲 {crit_prefix}{kind} {self.label}: {', '.join(parts)} → {self.total} vs {dc_label} {self.dc} — {result}"
-        if self.reasons:
-            out += f"  [{', '.join(self.reasons)}]"
-        return out
+        lines.append(
+            f"└ Итого: <b>{self.total}</b> vs {dc_label} {self.dc} → "
+            f"{icon} <b>{verdict}</b>{margin_str}"
+        )
+        return "\n".join(lines)
 
 
 def ability_mod(character: Character, key: str) -> int:
@@ -325,6 +403,54 @@ def make_save_roll(
     )
 
 
+@dataclass
+class DamageBreakdown:
+    """Structured damage roll — total + every input so the chat can render
+    a pretty multi-line tree. Use `roll_damage_pretty` to get one."""
+    total: int
+    rolls: list[int]
+    sides: int
+    flat_mod: int           # the +/- baked into the expression OR ability mod
+    has_explicit_mod: bool  # True if the dice_expr ended with "+N" / "-N"
+    critical: bool
+    dice_expr: str          # original expression like "1d8+2"
+
+
+def roll_damage_pretty(
+    dice_expr: str,
+    ability_mod_value: int = 0,
+    *,
+    critical: bool = False,
+) -> DamageBreakdown:
+    """Like `roll_damage` but returns every input so the caller can render
+    a breakdown ("[6] + 2 Сила = 8"). Falls back to (0, []) on empty input.
+    """
+    expr = (dice_expr or "").strip()
+    if not expr:
+        return DamageBreakdown(0, [], 0, 0, False, False, "")
+    m = _DMG_RE.match(expr)
+    if not m:
+        try:
+            r = roll_dice(expr)
+            return DamageBreakdown(max(0, r.total), [], 0, 0, False, False, expr)
+        except Exception:
+            return DamageBreakdown(0, [], 0, 0, False, False, expr)
+    count = int(m.group(1))
+    sides = int(m.group(2))
+    flat = int((m.group(3) or "0").replace(" ", ""))
+    has_explicit_mod = bool(m.group(3))
+    actual_count = count * 2 if critical else count
+    rolls = [random.randint(1, sides) for _ in range(actual_count)]
+    dice_total = sum(rolls)
+    mod_part = flat if has_explicit_mod else ability_mod_value
+    total = max(0, dice_total + mod_part)
+    return DamageBreakdown(
+        total=total, rolls=rolls, sides=sides,
+        flat_mod=mod_part, has_explicit_mod=has_explicit_mod,
+        critical=critical, dice_expr=expr,
+    )
+
+
 def roll_damage(dice_expr: str, ability_mod_value: int = 0, *, critical: bool = False) -> tuple[int, str]:
     """Roll a weapon damage expression like "1d8", "2d6+3", "1d10-1".
 
@@ -359,12 +485,57 @@ def roll_damage(dice_expr: str, ability_mod_value: int = 0, *, critical: bool = 
     mod_part = flat if has_explicit_mod else ability_mod_value
     total = max(0, dice_total + mod_part)
 
-    bits = [f"{actual_count}d{sides}{rolls}"]
+    # Compact one-liner — game_service composes the multi-line block.
+    # Format: "1d8[6] +2 → 8" or "2d8[6,5] +2 (крит ×2 кости) → 13"
+    rolls_str = ",".join(str(r) for r in rolls)
+    bits = [f"{actual_count}d{sides}[{rolls_str}]"]
     if mod_part:
         bits.append(f"{mod_part:+d}")
     if critical:
         bits.append("(крит ×2 кости)")
     return total, " ".join(bits) + f" → {total}"
+
+
+def format_damage_breakdown(
+    dice_expr: str,
+    rolls: list[int],
+    flat_mod: int,
+    total: int,
+    *,
+    critical: bool = False,
+    damage_type: str = "",
+    ability_label: str = "",
+) -> str:
+    """Render a damage roll as a 3–4 line tree:
+
+        🏹 <b>Урон: 1d8+2 колющий</b>
+        ┌ Кости 1d8: [6]
+        ├ Сила: +2
+        └ Итого: <b>8</b> 🏹 колющего
+
+    `ability_label` lets callers say "Ловкость" instead of just "+2". Pass
+    "" when the +mod was baked into the dice expression (LLM string like
+    "1d10+3" — we don't know what the +3 represents).
+    """
+    type_str = format_damage_type(damage_type)
+    emoji = type_str.split()[0] if type_str else "💥"
+    type_tail = f" {type_str.split(' ', 1)[1]}" if type_str else ""
+    head = f"{emoji} <b>Урон: {dice_expr}{type_tail}</b>"
+    if critical:
+        head += " 💥"
+    lines = [head]
+    rolls_str = ",".join(str(r) for r in rolls)
+    n = len(rolls)
+    if rolls:
+        sides_label = f"{n}d?" if not dice_expr else dice_expr.split("+")[0].split("-")[0].strip()
+        lines.append(f"┌ Кости {sides_label}: [{rolls_str}] = <b>{sum(rolls)}</b>")
+    if flat_mod:
+        mod_label = ability_label or "модификатор"
+        lines.append(f"├ {mod_label}: <b>{flat_mod:+d}</b>")
+    if critical:
+        lines.append("├ <i>крит — кости удвоены</i>")
+    lines.append(f"└ Итого: <b>{total}</b>")
+    return "\n".join(lines)
 
 
 _DMG_RE = re.compile(r"^\s*(\d+)d(\d+)\s*([+-]\s*\d+)?\s*$", re.IGNORECASE)

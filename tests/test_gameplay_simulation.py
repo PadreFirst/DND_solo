@@ -62,7 +62,8 @@ class TestFullGameplaySession:
 
         assert gs.turn_number == 2
         assert "старик" in out.text.lower()
-        assert "🎲" in out.text  # dice roll shown
+        # Dice block uses 🎲 normally, 💥 on a nat20, 💀 on a nat1 — accept any.
+        assert any(m in out.text for m in ("🎲", "💥", "💀"))
         assert "проницательность" in out.text.lower()
 
         # --- Step 4: Player asks a question ---

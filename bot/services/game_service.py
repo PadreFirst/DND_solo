@@ -788,25 +788,30 @@ class GameService:
                 if ability_key is None:
                     ability_key = "STR"
 
-                # Hard check: если оружия в инвентаре нет И LLM не дала
-                # damage_dice — это невалидная атака. Показываем честно.
                 if not dmg_expr:
                     pre_lines.append(
-                        f"⚠ Атака '{rr.label}': нет подходящего оружия в руках — бросок не делаем."
+                        f"⚠ Атака «{rr.label}»: нет подходящего оружия в руках — бросок не делаем."
                     )
                     continue
 
-                # Hard check (combat state machine): одна атака = одно
-                # действие за раунд. Повторная атака в том же раунде
-                # отбрасывается с явным сообщением — это предсказуемая
-                # механика, а не "LLM решила так".
                 if gs.combat_active and gs.action_used:
                     pre_lines.append(
-                        f"⚠ Атака '{rr.label}': действие уже потрачено в этом раунде."
+                        f"⚠ Атака «{rr.label}»: действие уже потрачено в этом раунде."
                     )
                     continue
                 if gs.combat_active:
                     gs.action_used = True
+
+                # Pre-roll preview — let the player see what's about to be
+                # thrown BEFORE the result lands (UX brief #3). One compact
+                # block, not a separate message.
+                target_idx_preview = _find_scene_target(scene, rr.target)
+                if target_idx_preview is not None:
+                    tgt = scene[target_idx_preview]
+                    pre_lines.append(
+                        f"🎯 <b>Прицеливаюсь:</b> {tgt.get('name', 'Враг')} "
+                        f"(🛡 КД {tgt.get('ac', '?')}, ♥ {tgt.get('hp_current', '?')}/{tgt.get('hp_max', '?')})"
+                    )
 
                 rich = engine.make_attack_roll(
                     ch, rr.dc, ability_key=ability_key,
@@ -817,30 +822,35 @@ class GameService:
                 pre_lines.append(rich.format(kind="Атака"))
 
                 if rich.success and dmg_expr:
-                    # Crit on nat20 (on the chosen d20 after advantage/disadvantage).
                     chosen_d20 = rich.d20 if rich.d20_alt is None else (
                         max(rich.d20, rich.d20_alt) if rich.advantage else min(rich.d20, rich.d20_alt)
                     )
                     crit = chosen_d20 == 20
-                    dmg_total, dmg_detail = engine.roll_damage(
+                    dmg = engine.roll_damage_pretty(
                         dmg_expr, ability_mod_value=ab_mod_for_dmg, critical=crit,
                     )
-                    pre_lines.append(f"💥 Урон: {dmg_detail}")
+                    ability_full = engine.ABILITY_RU.get(ability_key, ability_key)
+                    pre_lines.append(engine.format_damage_breakdown(
+                        dmg_expr, dmg.rolls, dmg.flat_mod, dmg.total,
+                        critical=crit, damage_type=rr.damage_type or "",
+                        ability_label=ability_full if not dmg.has_explicit_mod else "",
+                    ))
 
-                    # Apply to the named target if we can find it, otherwise
-                    # the first living enemy. Prevents "я стрелял, но никто
-                    # не умер" confusion.
                     target_idx = _find_scene_target(scene, rr.target)
                     if target_idx is not None:
                         entry = scene[target_idx]
                         hp_before = int(entry.get("hp_current", 0) or 0)
-                        hp_after = max(0, hp_before - dmg_total)
+                        hp_after = max(0, hp_before - dmg.total)
                         entry["hp_current"] = hp_after
+                        hp_max = int(entry.get("hp_max", hp_before) or hp_before)
+                        bar = engine.hp_bar(hp_after, hp_max)
                         pre_lines.append(
-                            f"♥ {entry.get('name', 'Враг')}: {hp_before} → {hp_after}"
+                            f"♥ <b>{entry.get('name', 'Враг')}</b>: "
+                            f"{hp_before} → {hp_after} HP ({-dmg.total:+d})\n"
+                            f"   {bar}"
                         )
                         if hp_after == 0:
-                            pre_lines.append(f"☠ {entry.get('name', 'Враг')} повержен.")
+                            pre_lines.append(f"☠ <b>{entry.get('name', 'Враг')} повержен!</b>")
             elif rr.type == "save":
                 rich = engine.make_save_roll(
                     ch, rr.ability or "CON", rr.dc,
@@ -853,35 +863,77 @@ class GameService:
             atk_d20 = random.randint(1, 20)
             atk_total = atk_d20 + ea.attack_bonus
             hit = atk_total >= ch.ac
-            pre_lines.append(
-                f"🎲 {ea.name}: d20={atk_d20}, бонус {ea.attack_bonus:+d} → {atk_total} vs КД {ch.ac} — "
-                f"{'Попадание' if hit else 'Промах'}"
-            )
+            # Multi-line block mirroring the player's own attack format so
+            # the chat reads consistently. The player should be able to
+            # SEE that "the orc rolled a 17 because it needed 13 vs my AC".
+            crit_tag = ""
+            verdict_word = "Попадание"
+            verdict_icon = "✅"
+            if atk_d20 == 20:
+                crit_tag = "💥 КРИТ! "
+                verdict_word = "КРИТИЧЕСКОЕ ПОПАДАНИЕ"
+                verdict_icon = "💥"
+            elif atk_d20 == 1:
+                crit_tag = "💀 ФУМБЛ! "
+                verdict_word = "КРИТИЧЕСКИЙ ПРОМАХ"
+                verdict_icon = "💀"
+                hit = False
+            elif not hit:
+                verdict_word = "Промах"
+                verdict_icon = "❌"
+            margin = atk_total - ch.ac
+            if hit:
+                margin_str = f" (на {abs(margin)} больше)" if margin >= 0 else ""
+            else:
+                margin_str = f" (не хватило {abs(margin) + 1})" if crit_tag == "" else ""
+            ea_block = [
+                f"⚔ <b>{crit_tag}{ea.name} атакует тебя</b>" + (f" — <i>{ea.reason}</i>" if ea.reason else ""),
+                f"┌ d20: <b>{atk_d20}</b>",
+                f"├ Бонус: <b>{ea.attack_bonus:+d}</b>",
+                f"└ Итого: <b>{atk_total}</b> vs твоя КД {ch.ac} → {verdict_icon} <b>{verdict_word}</b>{margin_str}",
+            ]
+            pre_lines.append("\n".join(ea_block))
+
             if hit and ea.damage_dice:
-                dmg = roll_dice(ea.damage_dice)
+                dmg = engine.roll_damage_pretty(ea.damage_dice)
                 old, new = engine.apply_damage(ch, -dmg.total, damage_type=ea.damage_type or "")
                 applied = old - new
-                type_tag = f" ({ea.damage_type})" if ea.damage_type else ""
+                type_str = engine.format_damage_type(ea.damage_type or "")
+                head = f"💥 <b>Урон по тебе: {ea.damage_dice}</b>"
+                if type_str:
+                    head += f" {type_str}"
+                lines = [head]
+                rolls_str = ",".join(str(r) for r in dmg.rolls) if dmg.rolls else "—"
+                lines.append(f"┌ Кости: [{rolls_str}] = <b>{sum(dmg.rolls) if dmg.rolls else dmg.total}</b>")
+                if dmg.flat_mod:
+                    lines.append(f"├ Модификатор: <b>{dmg.flat_mod:+d}</b>")
                 if applied != dmg.total:
-                    # Resist/vuln/immune took effect — surface it so the
-                    # player understands why they took more/less.
-                    pre_lines.append(
-                        f"♥ HP: {old} → {new} (урон {dmg.total}{type_tag} → применено {applied})"
-                    )
-                else:
-                    pre_lines.append(f"♥ HP: {old} → {new} (урон {dmg.total}{type_tag})")
+                    delta_word = "уменьшено сопротивлением" if applied < dmg.total else "увеличено уязвимостью"
+                    lines.append(f"├ <i>{delta_word}: {dmg.total} → {applied}</i>")
+                lines.append(f"└ Итого по HP: <b>−{applied}</b>")
+                pre_lines.append("\n".join(lines))
+                pre_lines.append(
+                    f"♥ <b>Твои HP:</b> {old} → {new} HP\n"
+                    f"   {engine.hp_bar(new, ch.hp_max)}"
+                )
                 if ch.hp_current == 0:
                     _add_cond(ch, "unconscious")
                     ch.death_saves_success = 0
                     ch.death_saves_failure = 0
-                    pre_lines.append("💀 Ты упал без сознания — начинаются спасброски смерти.")
+                    pre_lines.append("💀 <b>Ты упал без сознания</b> — начинаются спасброски смерти.")
 
         # === POST-NARRATIVE mechanics (applied, summarised, shown after story) ===
         post_lines: list[str] = []
 
         if plan.direct_hp_change != 0:
             old, new = engine.apply_damage(ch, plan.direct_hp_change, damage_type="")
-            post_lines.append(f"♥ HP: {old} → {new}")
+            sign = "+" if plan.direct_hp_change > 0 else ""
+            verb = "Лечение" if plan.direct_hp_change > 0 else "Урон"
+            icon = "💚" if plan.direct_hp_change > 0 else "💥"
+            post_lines.append(
+                f"{icon} <b>{verb}:</b> {old} → {new} HP ({sign}{plan.direct_hp_change})\n"
+                f"   {engine.hp_bar(new, ch.hp_max)}"
+            )
             if ch.hp_current == 0 and plan.direct_hp_change < 0:
                 _add_cond(ch, "unconscious")
                 ch.death_saves_success = 0
