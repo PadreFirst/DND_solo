@@ -51,6 +51,16 @@ _SOFT_MIGRATIONS: tuple[str, ...] = (
     "ALTER TABLE game_sessions ADD COLUMN last_quest_create_turn INTEGER DEFAULT 0",
     "ALTER TABLE quests ADD COLUMN deadline_turns_remaining INTEGER DEFAULT 0",
     "ALTER TABLE quests ADD COLUMN last_updated_turn INTEGER DEFAULT 0",
+    "ALTER TABLE npc_state ADD COLUMN bond INTEGER DEFAULT 0",
+    "ALTER TABLE npc_state ADD COLUMN speech_style VARCHAR(160) DEFAULT ''",
+    "ALTER TABLE npc_state ADD COLUMN appearance TEXT DEFAULT ''",
+    "ALTER TABLE npc_state ADD COLUMN promises_json TEXT DEFAULT '[]'",
+    "ALTER TABLE npc_state ADD COLUMN debts_json TEXT DEFAULT '[]'",
+    "ALTER TABLE npc_state ADD COLUMN secrets_known_json TEXT DEFAULT '[]'",
+    "ALTER TABLE npc_state ADD COLUMN gifts_received_json TEXT DEFAULT '[]'",
+    "ALTER TABLE npc_state ADD COLUMN last_quote TEXT DEFAULT ''",
+    "ALTER TABLE npc_state ADD COLUMN death_turn INTEGER DEFAULT 0",
+    "ALTER TABLE npc_state ADD COLUMN death_cause VARCHAR(255) DEFAULT ''",
 )
 
 

@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from bot.schemas import EnemyAction, InventoryChange, RollRequest, TurnPlan
+from bot.schemas import EnemyAction, InventoryChange, NPCAppearance, RollRequest, TurnPlan
 
 
 class TestTurnPlanValidation:
@@ -65,3 +65,24 @@ class TestTurnPlanValidation:
     def test_invalid_roll_type_still_parses(self):
         plan = TurnPlan(rolls=[{"type": "unknown", "label": "test"}])
         assert plan.rolls[0].type == "unknown"
+
+
+class TestNpcAppearanceCoercion:
+    """LLM occasionally returns 0 / null / int for str fields. Schema must
+    coerce instead of crashing — a ValidationError mid-combat used to
+    trigger the fallback turn (generic options, no narrative)."""
+
+    def test_int_coerced_to_str(self):
+        a = NPCAppearance(name="Слай", add_debt=0, add_gift=42, role=123)
+        assert a.add_debt == "0"
+        assert a.add_gift == "42"
+        assert a.role == "123"
+
+    def test_none_coerced_to_empty(self):
+        a = NPCAppearance(name="Слай", add_promise=None, last_quote=None)
+        assert a.add_promise == ""
+        assert a.last_quote == ""
+
+    def test_str_passes_through(self):
+        a = NPCAppearance(name="Слай", add_debt="должен 200 кред")
+        assert a.add_debt == "должен 200 кред"

@@ -122,7 +122,24 @@ _FORMAT_HINT = (
     "- Напарники: add_companion для найма (бот-управляемый NPC), remove_companion при уходе/смерти. Напарники сражаются сами (код крутит инициативу и броски).\n"
     "- На /levelup игрок выбирает перк в отдельном диалоге — НЕ меняй abilities/HP/powers игрока вручную после level-up, это делает отдельный вызов LLM.\n"
     "- current_beat: ОБЯЗАТЕЛЬНО заполняй каждый ход — ≤80 символов, что игроку сделать прямо СЕЙЧАС, чтобы продвинуть сцену. НЕ глобальная цель квеста.\n"
-    "- npc_appearances: при любом упоминании именованного NPC заполни запись (name/role/faction/attitude/notes). Без этого NPC исчезает через 20 ходов.\n"
+    "- npc_appearances: при любом упоминании именованного NPC заполни запись. Поля:\n"
+    "    name, role, faction, attitude (hostile|cold|neutral|friendly|ally|dead), notes,\n"
+    "    bond_delta (-5..+5 за этот ход), appearance (внешность+манеры — раз и навсегда),\n"
+    "    speech_style (одна фраза про голос), last_quote (свежая реплика NPC),\n"
+    "    add_promise (что обещали этому NPC или он игроку), add_debt (долг), add_secret (секрет который знает NPC), add_gift (что игрок ему подарил),\n"
+    "    died=true + death_cause если NPC погиб этот ход.\n"
+    "    Все поля str — если поле не нужно, ставь \"\" (пустую строку), НЕ 0 и НЕ null.\n"
+    "    Пример заполнения при первой встрече с информатором, которому игрок дал взятку:\n"
+    '    {"name":"Слай", "role":"уличный информатор", "faction":"независимый",\n'
+    '     "attitude":"cold", "notes":"нервный, потеет, кидает взгляды на дверь",\n'
+    '     "bond_delta":1, "appearance":"тощий, обритый налысо, татуировка дракона на шее",\n'
+    '     "speech_style":"шепелявит, говорит обрывками",\n'
+    '     "last_quote":"«Я ничего не видел, ясно?»",\n'
+    '     "add_promise":"обещал перезвонить через час с адресом",\n'
+    '     "add_gift":"игрок дал 50 кред наликом",\n'
+    '     "add_secret":"знает где прячется сестра игрока",\n'
+    '     "add_debt":"", "died":false, "death_cause":""}\n'
+    "    Без этого NPC исчезает через 20 ходов и мир разваливается на одноразовых людей.\n"
     "- Провал броска = реальное последствие. На fail НЕ выдавай xp_award / inventory_changes.add / grant_recipe / grant_ability / quest_events.complete*. Награды только на success.\n"
     "- Не плоди роллы без ставок. Если игрок не пошёл на риск — нарративная развязка без броска.\n"
     "- Опции БЕЗ нумерации '1.' / '1)' — кнопки уже подписаны. Префикс эмодзи-тег подхода (⚡/🗣/🥷/🧠/🤝) — ок.\n"
@@ -232,10 +249,17 @@ class GeminiClient:
         last_error: Exception | None = None
         for attempt in range(3):
             try:
+                # Lower temperature on retry — first attempt creative, then
+                # tighten to coax strict JSON out of the model.
+                temp = 0.3 if attempt == 0 else 0.15
                 data = await self._call(
                     prompt=prompt,
                     model=settings.gemini_model,
-                    temperature=0.4,
+                    temperature=temp,
+                    # 6000 tokens — observed real-world plans run ~3.5k chars;
+                    # 4000 was occasionally truncating mid-JSON ("Unterminated
+                    # string") which forced a fallback into a generic turn.
+                    max_tokens=6000,
                     response_mime_type="application/json",
                 )
                 return self._parse_plan_text(self._extract_text(data))

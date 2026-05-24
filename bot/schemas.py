@@ -1,6 +1,19 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def _str_or_empty(v) -> str:
+    """Pydantic v2 validator helper — coerce int/None/whatever to a string.
+    The LLM occasionally returns `0` or `null` for optional string fields
+    instead of "" — that used to raise ValidationError and trigger a retry
+    cascade mid-combat. Coerce instead.
+    """
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        return v
+    return str(v)
 
 
 class RollRequest(BaseModel):
@@ -211,12 +224,45 @@ class NPCAppearance(BaseModel):
     """Named NPC introduced (or recurring) on this turn. Persisted in
     npc_state so future turns can callback / reference them. Without this,
     NPCs vanish after the 20-message window and the world feels disposable.
+
+    Fill the relationship fields whenever the LLM has a clear hook —
+    a debt the player owes, a promise made, a secret the NPC knows, a
+    gift received. These power callbacks that read as a real relationship
+    instead of a flat name.
     """
     name: str = ""
     role: str = ""           # short label: "информатор", "торговец", "капитан стражи"
     faction: str = ""        # affiliation, drives reputation lookups
-    attitude: str = "neutral"  # hostile|cold|neutral|friendly|ally
+    attitude: str = "neutral"  # hostile|cold|neutral|friendly|ally|dead
     notes: str = ""          # one-line memo so callbacks have hooks
+    # Bond delta this turn (−5..+5). Positive = warmer, negative = colder.
+    # Engine clamps cumulative bond to −10..+10.
+    bond_delta: int = 0
+    # First-encounter description — appearance + mannerisms. Set once,
+    # the LLM rarely overwrites. Drives consistent voice on return.
+    appearance: str = ""
+    speech_style: str = ""
+    # Fresh memorable quote from THIS encounter. Replaces last_quote.
+    last_quote: str = ""
+    # Add to the running lists. Each entry should be a short standalone
+    # sentence so it survives out of context ("обещал заплатить 200 кред").
+    add_promise: str = ""    # player → NPC OR NPC → player; phrasing makes it clear
+    add_debt: str = ""       # what player owes or is owed
+    add_secret: str = ""     # secret this NPC knows about the player / world
+    add_gift: str = ""       # item / favor player gave THIS NPC
+    # If the NPC died this turn — fill these (engine flips attitude=dead,
+    # records death_turn + cause). Ghost / memory callbacks reference these.
+    died: bool = False
+    death_cause: str = ""
+
+    # All str fields below tolerate LLM giving us 0/null/123 instead of ""
+    # so an int in `add_debt` doesn't trigger a retry cascade mid-combat.
+    _coerce = field_validator(
+        "name", "role", "faction", "attitude", "notes", "appearance",
+        "speech_style", "last_quote", "add_promise", "add_debt",
+        "add_secret", "add_gift", "death_cause",
+        mode="before",
+    )(staticmethod(_str_or_empty))
 
 
 class CompanionSpec(BaseModel):

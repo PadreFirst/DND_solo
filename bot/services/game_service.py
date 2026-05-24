@@ -359,18 +359,45 @@ class GameService:
         ))
         npc_line = ""
         if npcs:
-            npc_line = "Recent NPCs (реферни хотя бы одного раз в 3-5 ходов когда уместно):\n"
+            npc_line = (
+                "Recent NPCs (реферни хотя бы одного раз в 3-5 ходов когда уместно — "
+                "используй их голос, долги, обещания, секреты как сюжетные крючки):\n"
+            )
             for n in npcs:
-                tag = f" †" if n.attitude == "dead" else ""
-                bits = [n.name]
+                dead_tag = " †" if (n.attitude == "dead" or (n.death_turn or 0) > 0) else ""
+                header_bits = [n.name + dead_tag]
                 if n.role:
-                    bits.append(n.role)
+                    header_bits.append(n.role)
                 if n.faction:
-                    bits.append(f"фракция: {n.faction}")
-                if n.attitude and n.attitude not in ("neutral", "dead"):
-                    bits.append(n.attitude)
-                meta = f" ({', '.join(bits[1:])})" if len(bits) > 1 else ""
-                npc_line += f"  • {n.name}{tag}{meta}, last_seen turn {n.last_seen_turn}\n"
+                    header_bits.append(f"фракция: {n.faction}")
+                meta = ", ".join(header_bits[1:])
+                bond = int(n.bond or 0)
+                bond_str = f", связь {bond:+d}" if bond else ""
+                npc_line += f"  • {header_bits[0]}"
+                if meta:
+                    npc_line += f" ({meta})"
+                npc_line += f"{bond_str}, last_seen turn {n.last_seen_turn}\n"
+                if n.appearance:
+                    npc_line += f"    внешность: {n.appearance[:200]}\n"
+                if n.speech_style:
+                    npc_line += f"    голос: {n.speech_style[:120]}\n"
+                if n.last_quote:
+                    npc_line += f"    последняя реплика: «{n.last_quote[:180]}»\n"
+                for lbl, raw in (
+                    ("обещания", n.promises_json),
+                    ("долги", n.debts_json),
+                    ("знает секрет", n.secrets_known_json),
+                    ("получил подарок", n.gifts_received_json),
+                ):
+                    try:
+                        items = json.loads(raw or "[]")
+                    except Exception:
+                        items = []
+                    if items:
+                        npc_line += f"    {lbl}: {'; '.join(str(x)[:120] for x in items[-3:])}\n"
+                if n.death_turn:
+                    cause = f" ({n.death_cause})" if n.death_cause else ""
+                    npc_line += f"    † умер на ходу {n.death_turn}{cause} — призрак/память может всплыть\n"
 
         # Active quests — title + remaining deadline so the LLM can weave
         # time pressure into the narrative.
@@ -746,11 +773,26 @@ class GameService:
         gs.last_options_json = json.dumps(options, ensure_ascii=False)
         gs.turn_number = 1
 
+        # Seed beat-line from the opening — if the LLM didn't fill it,
+        # fall back to the quest-hook so the player isn't staring at an
+        # empty "🎯 Сейчас:" slot on turn 1.
+        if plan.current_beat:
+            gs.current_beat = plan.current_beat[:120]
+        elif plan.quest_update:
+            gs.current_beat = plan.quest_update[:120]
+
+        # Persist named NPCs introduced in the opening scene so they exist
+        # in the registry from turn 1 — without this the GM can introduce
+        # a fiancée / boss / mentor in the intro and forget them by turn 4.
+        for npc_app in plan.npc_appearances or []:
+            await self._upsert_npc_appearance(db, user, gs, npc_app)
+
         # Use the rich starter screen (UX brief #1) instead of the cramped
         # one-liner intro — new players need to see who they are, what they
         # carry, what they can do, and how to play. ALL Russian, no DEX/STR.
         starter = self.format_starter_screen(ch)
-        full_text = f"{starter}\n\n━━━━━━━━━━━━━━━━━━\n\n{narrative}"
+        beat_line = f"\n\n🎯 <b>Сейчас:</b> {gs.current_beat}" if gs.current_beat else ""
+        full_text = f"{starter}\n\n━━━━━━━━━━━━━━━━━━\n\n{narrative}{beat_line}"
         await self.save_message(db, user.id, "assistant", narrative)
         return TurnOutput(text=full_text, options=options)
 
@@ -1269,7 +1311,23 @@ class GameService:
                 "✏ Написать свой вариант",
             ]
         else:
-            lines.append("…Ты без сознания. На следующем ходу — очередной спасбросок.")
+            # Pull the personal stake out of onboarding state if present —
+            # this is the most emotionally loaded moment in the game and
+            # the LLM never sees the death-save loop, so the engine has to
+            # carry the weight itself.
+            stake_hint = ""
+            try:
+                onb = json.loads(gs.onboarding_state_json or "{}")
+                stake = (onb.get("stake") or "").strip() if isinstance(onb, dict) else ""
+                if stake:
+                    stake_hint = f"\n   <i>Если умрёшь — ты подведёшь: {stake}</i>"
+            except Exception:
+                pass
+            lines.append(
+                "…Ты без сознания. Дыхание ломается, перед глазами — лоскуты "
+                "воспоминаний. На следующем ходу — очередной спасбросок."
+                + stake_hint
+            )
             opts = [
                 "Продолжить (ещё спасбросок)",
                 "Позвать на помощь (если рядом есть союзники)",
@@ -1883,12 +1941,37 @@ class GameService:
 
         return ""
 
+    @staticmethod
+    def _append_json_list(field_json: str, item: str, cap: int = 8) -> str:
+        """Append a short string to a JSON list column, keeping only the
+        last `cap` entries. Dedups exact matches so the LLM can re-emit
+        the same promise without it growing forever.
+        """
+        item = (item or "").strip()
+        if not item:
+            return field_json or "[]"
+        try:
+            data = json.loads(field_json or "[]")
+            if not isinstance(data, list):
+                data = []
+        except Exception:
+            data = []
+        data = [x for x in data if str(x).strip() and str(x).strip() != item]
+        data.append(item)
+        return json.dumps(data[-cap:], ensure_ascii=False)
+
     async def _upsert_npc_appearance(
         self, db: AsyncSession, user: User, gs: GameSession, app,
     ) -> None:
         """Persist (or update) a named NPC seen this turn. Without this the
         engine forgets named characters as soon as they fall out of the
         20-message sliding window, killing callbacks.
+
+        The NPC table is intentionally rich — bond, speech_style,
+        appearance, promises[], debts[], secrets_known[], gifts_received[],
+        last_quote, death_turn/cause. Every field is replayed into the
+        system prompt so the LLM can write a real relationship instead of
+        a flat name + role.
         """
         name = (getattr(app, "name", "") or "").strip()
         if not name:
@@ -1900,33 +1983,73 @@ class GameService:
             )
         )
         cur_turn = int(gs.turn_number or 0)
+
+        new_attitude = (getattr(app, "attitude", "") or "neutral")[:40]
+        died = bool(getattr(app, "died", False))
+        if died:
+            new_attitude = "dead"
+
         if not row:
             row = NPCState(
                 user_id=user.id,
                 name=name[:255],
                 current_location=gs.current_location,
                 role=(getattr(app, "role", "") or "")[:120],
-                attitude=(getattr(app, "attitude", "") or "neutral")[:40],
+                attitude=new_attitude,
                 notes=(getattr(app, "notes", "") or "")[:1000],
                 faction=(getattr(app, "faction", "") or "")[:120],
                 last_seen_turn=cur_turn,
+                bond=max(-10, min(10, int(getattr(app, "bond_delta", 0) or 0))),
+                speech_style=(getattr(app, "speech_style", "") or "")[:160],
+                appearance=(getattr(app, "appearance", "") or "")[:2000],
+                last_quote=(getattr(app, "last_quote", "") or "")[:1000],
             )
+            if died:
+                row.death_turn = cur_turn
+                row.death_cause = (getattr(app, "death_cause", "") or "")[:255]
+            # Seed the JSON lists.
+            row.promises_json = self._append_json_list("[]", getattr(app, "add_promise", "") or "")
+            row.debts_json = self._append_json_list("[]", getattr(app, "add_debt", "") or "")
+            row.secrets_known_json = self._append_json_list("[]", getattr(app, "add_secret", "") or "")
+            row.gifts_received_json = self._append_json_list("[]", getattr(app, "add_gift", "") or "")
             db.add(row)
             await db.flush()
             return
-        # Update — pull through latest details, refresh last_seen so the
-        # context-replay ranks them recent.
+
+        # Existing — refresh ranking + accumulate relationship state.
         row.current_location = gs.current_location or row.current_location
         if getattr(app, "role", ""):
             row.role = (app.role or "")[:120]
-        if getattr(app, "attitude", ""):
-            row.attitude = (app.attitude or "neutral")[:40]
+        if new_attitude:
+            row.attitude = new_attitude
         if getattr(app, "faction", ""):
             row.faction = (app.faction or "")[:120]
         if getattr(app, "notes", ""):
-            # Append fresh notes without losing the old ones — but bound.
             merged = ((row.notes or "") + "\n" + (app.notes or "")).strip()
             row.notes = merged[-1000:]
+        delta = int(getattr(app, "bond_delta", 0) or 0)
+        if delta:
+            row.bond = max(-10, min(10, int(row.bond or 0) + delta))
+        if getattr(app, "speech_style", ""):
+            row.speech_style = (app.speech_style or "")[:160]
+        # Appearance — set once. Don't let the LLM rewrite a character's
+        # face every time they walk on screen.
+        if getattr(app, "appearance", "") and not row.appearance:
+            row.appearance = (app.appearance or "")[:2000]
+        if getattr(app, "last_quote", ""):
+            row.last_quote = (app.last_quote or "")[:1000]
+        # Accumulate event lists.
+        row.promises_json = self._append_json_list(
+            row.promises_json, getattr(app, "add_promise", "") or "")
+        row.debts_json = self._append_json_list(
+            row.debts_json, getattr(app, "add_debt", "") or "")
+        row.secrets_known_json = self._append_json_list(
+            row.secrets_known_json, getattr(app, "add_secret", "") or "")
+        row.gifts_received_json = self._append_json_list(
+            row.gifts_received_json, getattr(app, "add_gift", "") or "")
+        if died and not row.death_turn:
+            row.death_turn = cur_turn
+            row.death_cause = (getattr(app, "death_cause", "") or "")[:255]
         row.last_seen_turn = cur_turn
 
     async def _tick_quest_deadlines(

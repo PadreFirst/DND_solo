@@ -552,6 +552,88 @@ class TestNpcRegistry:
         assert rows[0].attitude == "hostile"
         assert rows[0].last_seen_turn == 9
 
+    async def test_relationship_fields_accumulate(self, db):
+        """Promises / debts / secrets / gifts accumulate as JSON lists, capped."""
+        from bot.schemas import NPCAppearance
+        from bot.models import NPCState
+
+        gemini = AsyncMock()
+        svc = GameService(gemini)
+        user = User(telegram_id=70022, username="rel_tester")
+        db.add(user)
+        await db.flush()
+        gs = await svc.ensure_session(db, user)
+        gs.turn_number = 3
+
+        await svc._upsert_npc_appearance(db, user, gs, NPCAppearance(
+            name="Риз", role="оружейник", bond_delta=2,
+            appearance="бородатый, шрам на брови, пахнет порохом",
+            speech_style="лаконичный, цедит сквозь зубы",
+            last_quote="«Деньги вперёд.»",
+            add_promise="игрок обещал вернуть пушку через сутки",
+        ))
+        gs.turn_number = 7
+        await svc._upsert_npc_appearance(db, user, gs, NPCAppearance(
+            name="Риз", bond_delta=-1,
+            add_debt="игрок должен 200 кред",
+            add_secret="знает где прячется сестра игрока",
+            last_quote="«Ты опоздал.»",
+        ))
+        row = await db.scalar(select(NPCState).where(NPCState.user_id == user.id))
+        assert row.bond == 1  # +2 −1
+        assert "пахнет порохом" in row.appearance  # set once, not overwritten
+        assert "опоздал" in row.last_quote
+        promises = json.loads(row.promises_json)
+        assert any("вернуть пушку" in p for p in promises)
+        debts = json.loads(row.debts_json)
+        assert any("200 кред" in d for d in debts)
+        secrets = json.loads(row.secrets_known_json)
+        assert any("сестра" in s for s in secrets)
+
+    async def test_death_recorded(self, db):
+        from bot.schemas import NPCAppearance
+        from bot.models import NPCState
+
+        gemini = AsyncMock()
+        svc = GameService(gemini)
+        user = User(telegram_id=70023, username="death_tester")
+        db.add(user)
+        await db.flush()
+        gs = await svc.ensure_session(db, user)
+        gs.turn_number = 4
+
+        await svc._upsert_npc_appearance(db, user, gs, NPCAppearance(
+            name="Зек", role="информатор",
+        ))
+        gs.turn_number = 8
+        await svc._upsert_npc_appearance(db, user, gs, NPCAppearance(
+            name="Зек", died=True, death_cause="бластерный выстрел",
+        ))
+        row = await db.scalar(select(NPCState).where(NPCState.user_id == user.id))
+        assert row.attitude == "dead"
+        assert row.death_turn == 8
+        assert "бластер" in row.death_cause
+
+    async def test_bond_clamped(self, db):
+        from bot.schemas import NPCAppearance
+        from bot.models import NPCState
+
+        gemini = AsyncMock()
+        svc = GameService(gemini)
+        user = User(telegram_id=70024, username="bond_tester")
+        db.add(user)
+        await db.flush()
+        gs = await svc.ensure_session(db, user)
+        gs.turn_number = 1
+
+        # Spam +5 a dozen times — must clamp to +10.
+        for _ in range(12):
+            await svc._upsert_npc_appearance(db, user, gs, NPCAppearance(
+                name="Друг", bond_delta=5,
+            ))
+        row = await db.scalar(select(NPCState).where(NPCState.user_id == user.id))
+        assert row.bond == 10
+
 
 @pytest.mark.asyncio
 class TestTensionClock:

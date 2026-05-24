@@ -200,6 +200,30 @@ class NPCState(Base):
     # Free-form short faction string. Used both for trade lookups and as
     # a callback hook ("the Yakuza haven't forgotten you stole their chip").
     faction: Mapped[str] = mapped_column(String(120), default="")
+    # ── Relationship & memory fields (replay into every system prompt) ──
+    # Bond strength −10..+10 (−10 mortal enemy, +10 inseparable ally).
+    # Replaces attitude as the quantitative measure.
+    bond: Mapped[int] = mapped_column(Integer, default=0)
+    # Single short sentence — how the NPC speaks (gravelly, formal,
+    # lispy). Helps LLM render consistent voice across appearances.
+    speech_style: Mapped[str] = mapped_column(String(160), default="")
+    # First-encounter snapshot — appearance + mannerisms. Set once,
+    # rarely overwritten, so the NPC reads as the same person every time.
+    appearance: Mapped[str] = mapped_column(Text, default="")
+    # Free-form structured: promises[], debts[], secrets_known[],
+    # gifts_received[], scars_caused[]. Stored as JSON list of short
+    # strings so the LLM can callback ("ты ему ещё должен 200 кредитов").
+    promises_json: Mapped[str] = mapped_column(Text, default="[]")
+    debts_json: Mapped[str] = mapped_column(Text, default="[]")
+    secrets_known_json: Mapped[str] = mapped_column(Text, default="[]")
+    gifts_received_json: Mapped[str] = mapped_column(Text, default="[]")
+    # Last memorable quote — gives the LLM a callback anchor and lets the
+    # player recognise the NPC by voice on return.
+    last_quote: Mapped[str] = mapped_column(Text, default="")
+    # If the NPC died — turn number + cause. Ghost callbacks reference these
+    # ("ты вспоминаешь, как Зек хрипел…" — turn N, cause).
+    death_turn: Mapped[int] = mapped_column(Integer, default=0)
+    death_cause: Mapped[str] = mapped_column(String(255), default="")
 
 
 class FactionReputation(Base):
