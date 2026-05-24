@@ -129,6 +129,14 @@ class GameSession(Base):
     # button flow and the player's concept message. Cleared on consumption.
     onboarding_state_json: Mapped[str] = mapped_column(Text, default="")
 
+    # Atomic scene goal — what the player must do RIGHT NOW. Rendered
+    # above options every turn so they don't lose the thread.
+    current_beat: Mapped[str] = mapped_column(String(160), default="")
+
+    # Turn number on which the last `quest_events.create` fired. Used to
+    # enforce a cooldown so the LLM can't spam the journal.
+    last_quest_create_turn: Mapped[int] = mapped_column(Integer, default=0)
+
     user: Mapped[User] = relationship(back_populates="session")
 
 
@@ -156,6 +164,12 @@ class Quest(Base):
     progress_json: Mapped[str] = mapped_column(Text, default="{}")
     reward_xp: Mapped[int] = mapped_column(Integer, default=0)
     reward_gold: Mapped[int] = mapped_column(Integer, default=0)
+    # Turn-budget for time-pressure quests. 0 = no deadline. Code decrements
+    # every turn and flips status to "failed" when it hits 0.
+    deadline_turns_remaining: Mapped[int] = mapped_column(Integer, default=0)
+    # Last turn this quest was created/updated. Drives auto-archival of
+    # quests that haven't moved in a long time (journal hygiene).
+    last_updated_turn: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class NPCState(Base):
@@ -180,6 +194,12 @@ class NPCState(Base):
     damage_type: Mapped[str] = mapped_column(String(24), default="")
     initiative_bonus: Mapped[int] = mapped_column(Integer, default=0)
     role: Mapped[str] = mapped_column(String(120), default="")
+    # Last turn this NPC was seen/mentioned. Drives "Recent NPCs:" replay
+    # into the context so the LLM can callback recently-named characters.
+    last_seen_turn: Mapped[int] = mapped_column(Integer, default=0)
+    # Free-form short faction string. Used both for trade lookups and as
+    # a callback hook ("the Yakuza haven't forgotten you stole their chip").
+    faction: Mapped[str] = mapped_column(String(120), default="")
 
 
 class FactionReputation(Base):

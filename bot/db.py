@@ -45,6 +45,12 @@ _SOFT_MIGRATIONS: tuple[str, ...] = (
     "ALTER TABLE npc_state ADD COLUMN damage_type VARCHAR(24) DEFAULT ''",
     "ALTER TABLE npc_state ADD COLUMN initiative_bonus INTEGER DEFAULT 0",
     "ALTER TABLE npc_state ADD COLUMN role VARCHAR(120) DEFAULT ''",
+    "ALTER TABLE npc_state ADD COLUMN last_seen_turn INTEGER DEFAULT 0",
+    "ALTER TABLE npc_state ADD COLUMN faction VARCHAR(120) DEFAULT ''",
+    "ALTER TABLE game_sessions ADD COLUMN current_beat VARCHAR(160) DEFAULT ''",
+    "ALTER TABLE game_sessions ADD COLUMN last_quest_create_turn INTEGER DEFAULT 0",
+    "ALTER TABLE quests ADD COLUMN deadline_turns_remaining INTEGER DEFAULT 0",
+    "ALTER TABLE quests ADD COLUMN last_updated_turn INTEGER DEFAULT 0",
 )
 
 

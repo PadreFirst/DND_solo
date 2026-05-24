@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from sqlalchemy import select
+
 from bot.models import User
 from bot.schemas import RollRequest, TurnPlan
 from bot.services.game_service import GameService, TurnOutput, is_gm_question
@@ -384,6 +386,213 @@ class TestFormatStarterScreen:
         ch = self._mk_char(inventory_json="[]")
         out = GameService.format_starter_screen(ch)
         assert "В РЮКЗАКЕ" not in out
+
+
+@pytest.mark.asyncio
+class TestFailIsFail:
+    """Failed rolls must not produce same-turn rewards (system_prompt #1)."""
+
+    async def test_failed_skill_strips_xp_and_grants(self, db):
+        from bot.schemas import (
+            RollRequest, InventoryChange, Recipe, RecipeComponent, Ability,
+            QuestEvent,
+        )
+
+        gemini = AsyncMock()
+        gemini.generate_turn_plan = AsyncMock(return_value=TurnPlan(
+            narrative="Ты пытаешься взломать дверь, но замок не поддаётся.",
+            rolls=[RollRequest(type="skill", label="ловкость рук", ability="DEX", dc=99)],
+            xp_award=50,
+            inventory_changes=[InventoryChange(action="add", name="Хитрый ключ", quantity=1)],
+            grant_recipe=Recipe(name="Отмычка", components=[RecipeComponent(name="Проволока", quantity=1)]),
+            grant_ability=Ability(name="Внутренний взор", max_uses=1, current_uses=1),
+            quest_events=[QuestEvent(action="complete", title="Открыть дверь")],
+            options=["Попробовать снова", "Уйти"],
+        ))
+        svc = GameService(gemini)
+        user = User(telegram_id=70001, username="fail_tester")
+        db.add(user)
+        await db.flush()
+        ch = await svc.ensure_character(db, user)
+        gs = await svc.ensure_session(db, user)
+        gs.turn_number = 1
+        xp_before = ch.xp_current
+
+        await svc.process_turn(db, user, "взломать замок")
+        # All same-turn rewards must be stripped because the DC=99 check failed.
+        assert ch.xp_current == xp_before
+        inv = json.loads(ch.inventory_json or "[]")
+        assert not any(i.get("name") == "Хитрый ключ" for i in inv)
+        recipes = json.loads(ch.known_recipes_json or "[]")
+        assert not any(r.get("name") == "Отмычка" for r in recipes)
+        powers = json.loads(ch.powers_json or "[]")
+        assert not any(p.get("name") == "Внутренний взор" for p in powers)
+
+    async def test_successful_skill_keeps_rewards(self, db):
+        from bot.schemas import RollRequest, InventoryChange
+
+        gemini = AsyncMock()
+        gemini.generate_turn_plan = AsyncMock(return_value=TurnPlan(
+            narrative="Ты легко вскрываешь дверь.",
+            rolls=[RollRequest(type="skill", label="ловкость рук", ability="DEX", dc=1)],
+            xp_award=25,
+            inventory_changes=[InventoryChange(action="add", name="Письмо", quantity=1)],
+            options=["Войти", "Подождать"],
+        ))
+        svc = GameService(gemini)
+        user = User(telegram_id=70002, username="ok_tester")
+        db.add(user)
+        await db.flush()
+        ch = await svc.ensure_character(db, user)
+        gs = await svc.ensure_session(db, user)
+        gs.turn_number = 1
+        xp_before = ch.xp_current
+
+        await svc.process_turn(db, user, "вскрываю")
+        assert ch.xp_current == xp_before + 25
+        inv = json.loads(ch.inventory_json or "[]")
+        assert any(i.get("name") == "Письмо" for i in inv)
+
+
+@pytest.mark.asyncio
+class TestQuestCooldownAndMerge:
+    """Quest spam protection (system_prompt #5)."""
+
+    async def test_create_blocked_by_cooldown(self, db):
+        from bot.schemas import QuestEvent
+
+        gemini = AsyncMock()
+        svc = GameService(gemini)
+        user = User(telegram_id=70010, username="quest_tester")
+        db.add(user)
+        await db.flush()
+        gs = await svc.ensure_session(db, user)
+        gs.turn_number = 3
+        gs.last_quest_create_turn = 2  # only 1 turn since last create
+
+        await svc._apply_quest_event(db, user, QuestEvent(
+            action="create", title="Второй квест за два хода",
+        ))
+        from bot.models import Quest
+        rows = list(await db.scalars(select(Quest).where(Quest.user_id == user.id)))
+        assert rows == []  # blocked
+
+    async def test_similar_title_merges(self, db):
+        from bot.schemas import QuestEvent
+        from bot.models import Quest
+
+        gemini = AsyncMock()
+        svc = GameService(gemini)
+        user = User(telegram_id=70011, username="merge_tester")
+        db.add(user)
+        await db.flush()
+        gs = await svc.ensure_session(db, user)
+        gs.turn_number = 10
+        # First quest — straight create.
+        await svc._apply_quest_event(db, user, QuestEvent(
+            action="create", title="След крови сестры",
+        ))
+        gs.turn_number = 20  # past cooldown
+        await svc._apply_quest_event(db, user, QuestEvent(
+            action="create", title="По следам пропавшей сестры",
+            description="Новые сведения о сестре",
+        ))
+        rows = list(await db.scalars(select(Quest).where(Quest.user_id == user.id)))
+        assert len(rows) == 1  # merged, not duplicated
+        assert "Новые сведения" in rows[0].description
+
+
+@pytest.mark.asyncio
+class TestNpcRegistry:
+    async def test_appearance_persists(self, db):
+        from bot.schemas import NPCAppearance
+        from bot.models import NPCState, GameSession
+
+        gemini = AsyncMock()
+        svc = GameService(gemini)
+        user = User(telegram_id=70020, username="npc_tester")
+        db.add(user)
+        await db.flush()
+        gs = await svc.ensure_session(db, user)
+        gs.turn_number = 5
+        gs.current_location = "Бар Красный Дракон"
+
+        await svc._upsert_npc_appearance(db, user, gs, NPCAppearance(
+            name="Слай", role="информатор", faction="Синдикат",
+            attitude="cold", notes="нервный, продаст за пол-цены",
+        ))
+        rows = list(await db.scalars(select(NPCState).where(NPCState.user_id == user.id)))
+        assert len(rows) == 1
+        assert rows[0].name == "Слай"
+        assert rows[0].faction == "Синдикат"
+        assert rows[0].last_seen_turn == 5
+
+    async def test_appearance_idempotent_update(self, db):
+        from bot.schemas import NPCAppearance
+        from bot.models import NPCState
+
+        gemini = AsyncMock()
+        svc = GameService(gemini)
+        user = User(telegram_id=70021, username="npc_tester2")
+        db.add(user)
+        await db.flush()
+        gs = await svc.ensure_session(db, user)
+        gs.turn_number = 5
+
+        await svc._upsert_npc_appearance(db, user, gs, NPCAppearance(
+            name="Слай", role="вор",
+        ))
+        gs.turn_number = 9
+        await svc._upsert_npc_appearance(db, user, gs, NPCAppearance(
+            name="Слай", role="вор", attitude="hostile",
+            notes="теперь враг",
+        ))
+        rows = list(await db.scalars(select(NPCState).where(NPCState.user_id == user.id)))
+        assert len(rows) == 1
+        assert rows[0].attitude == "hostile"
+        assert rows[0].last_seen_turn == 9
+
+
+@pytest.mark.asyncio
+class TestTensionClock:
+    async def test_deadline_decrements_and_fails_at_zero(self, db):
+        from bot.models import Quest, GameSession
+
+        gemini = AsyncMock()
+        svc = GameService(gemini)
+        user = User(telegram_id=70030, username="clock_tester")
+        db.add(user)
+        await db.flush()
+        gs = await svc.ensure_session(db, user)
+        gs.turn_number = 5
+        q = Quest(
+            user_id=user.id, title="Спасти сестру", status="active",
+            deadline_turns_remaining=2, last_updated_turn=1,
+        )
+        db.add(q)
+        await db.flush()
+
+        # Tick 1: 2 → 1, warning visible.
+        lines = await svc._tick_quest_deadlines(db, user)
+        assert any("Спасти сестру" in l for l in lines)
+        assert q.status == "active"
+        # Tick 2: 1 → 0, quest fails.
+        lines = await svc._tick_quest_deadlines(db, user)
+        assert q.status == "failed"
+        assert any("Время вышло" in l for l in lines)
+
+
+class TestOptionPrefixStripping:
+    def test_strips_numbered_prefix(self):
+        opts = GameService._ensure_options([
+            "1. Атаковать", "2) Бежать", "- Спрятаться", "Поговорить",
+        ])
+        # The numbering prefix from the LLM must be gone (buttons already
+        # display 1-5; double-numbering is visual noise).
+        for label in opts[:4]:
+            assert not label.startswith(("1.", "2.", "1)", "2)", "-"))
+        assert "Атаковать" in opts
+        assert "Бежать" in opts
 
 
 @pytest.mark.asyncio

@@ -184,25 +184,24 @@ class RichRoll:
     # Reasons for advantage/disadvantage/cancellation, e.g. ["poisoned","темнота"]
     reasons: list[str] = field(default_factory=list)
 
-    def format(self, *, kind: str = "Проверка") -> str:
-        """Render a roll as a chat-ready multi-line breakdown.
+    def format(self, *, kind: str = "Проверка", verbose: bool = False) -> str:
+        """Render a roll for chat.
 
-        Goal: the player can SEE every input that went into the result —
-        which die was rolled, which stat added what, where the proficiency
-        came from, what bent the odds (advantage/poison/weather), and how
-        far above/below the DC the final total landed.
+        Default = one-liner (cheap on screen real-estate, plenty of info):
+            🎲 Скрытность: 17 vs DC 12 → ✅ Успех (на 5 больше)
+            💥 КРИТ! Атака мечом: 25 vs КД 13 → КРИТИЧЕСКОЕ ПОПАДАНИЕ
 
-        Layout:
-            🎲 <b>{kind}: {label}</b>
-            ┌ d20: <b>{chosen}</b> ({tag, if adv/dis})
-            ├ {Ability name}: {+/-N}
-            ├ Мастерство: {+/-N}
-            ├ {reason}                       ← e.g. poisoned, fog, rep +1
-            └ Итого: <b>{total}</b> vs DC/КД {dc} → ✅ <b>Успех</b> (на N)
+        verbose=True or auto-promoted on crit / fumble / attack — show the
+        full tree so the player can audit every modifier:
+            💥 <b>КРИТ! Атака: меч</b>
+            ┌ d20: <b>20</b>
+            ├ Сила: <b>+3</b>
+            ├ Мастерство: <b>+2</b>
+            └ Итого: <b>25</b> vs КД 13 → 💥 <b>КРИТИЧЕСКОЕ ПОПАДАНИЕ</b>
 
-        On nat-20 / nat-1 the header swaps in 💥 КРИТ / 💀 ФУМБЛ.
+        The cheap one-liner is the right default — most rolls don't need an
+        audit, and 5 lines per check drowns the narrative.
         """
-        # Pick the actual d20 we resolved on (handles adv/dis).
         chosen_d20 = self.d20
         if self.d20_alt is not None:
             chosen_d20 = max(self.d20, self.d20_alt) if self.advantage else min(self.d20, self.d20_alt)
@@ -210,44 +209,7 @@ class RichRoll:
         is_crit  = chosen_d20 == 20
         is_fumble = chosen_d20 == 1
 
-        # Header — flair crit/fumble loudly so they're impossible to miss.
-        if is_crit:
-            header = f"💥 <b>КРИТ! {kind}: {self.label}</b>"
-        elif is_fumble:
-            header = f"💀 <b>ФУМБЛ! {kind}: {self.label}</b>"
-        else:
-            header = f"🎲 <b>{kind}: {self.label}</b>"
-
-        lines: list[str] = [header]
-
-        # d20 line — show both dice when adv/dis, then which one was kept.
-        if self.d20_alt is not None:
-            tag = "преимущество" if self.advantage else "помеха"
-            other = self.d20_alt if chosen_d20 == self.d20 else self.d20
-            lines.append(
-                f"┌ d20: <b>{chosen_d20}</b> "
-                f"(второй кубик {other}, {tag})"
-            )
-        else:
-            lines.append(f"┌ d20: <b>{chosen_d20}</b>")
-
-        # Named ability modifier. Always show, even at +0 — players need to
-        # see WHY their attack got +0 and not a magic +3.
-        ab_full = ABILITY_RU.get(self.ability_key, self.ability_key)
-        lines.append(f"├ {ab_full}: <b>{self.ability_mod_value:+d}</b>")
-
-        # Proficiency contribution. proficiency_value can include rep mod —
-        # we keep it as-is rather than splitting (rep is shown via reasons).
-        if self.proficiency_value:
-            lines.append(f"├ Мастерство: <b>{self.proficiency_value:+d}</b>")
-
-        # Reasons (poison, fog, encumbered, reputation…) get a sub-line each
-        # so the player understands EXACTLY why the odds moved.
-        for r in self.reasons:
-            lines.append(f"├ <i>{r}</i>")
-
-        # Bottom line — total vs DC + margin so "scraped by" vs "crushed it"
-        # is visible at a glance.
+        # Resolve verdict text + icon once.
         dc_label = "КД" if kind == "Атака" else "DC"
         margin = self.total - self.dc
         if is_crit and kind == "Атака":
@@ -263,6 +225,42 @@ class RichRoll:
         else:
             margin_str = f" (не хватило {abs(margin) + 1})"
 
+        # Auto-promote to verbose on crit / fumble / attack — these are the
+        # high-stakes moments where breakdown matters.
+        if is_crit or is_fumble or kind == "Атака":
+            verbose = True
+
+        if not verbose:
+            # Compact one-liner. Used for routine skill checks and saves.
+            head_emoji = "🎲"
+            return (
+                f"{head_emoji} <b>{kind}: {self.label}</b> — "
+                f"{self.total} vs {dc_label} {self.dc} → "
+                f"{icon} {verdict}{margin_str}"
+            )
+
+        # Verbose tree — header + breakdown.
+        if is_crit:
+            header = f"💥 <b>КРИТ! {kind}: {self.label}</b>"
+        elif is_fumble:
+            header = f"💀 <b>ФУМБЛ! {kind}: {self.label}</b>"
+        else:
+            header = f"🎲 <b>{kind}: {self.label}</b>"
+        lines: list[str] = [header]
+
+        if self.d20_alt is not None:
+            tag = "преимущество" if self.advantage else "помеха"
+            other = self.d20_alt if chosen_d20 == self.d20 else self.d20
+            lines.append(f"┌ d20: <b>{chosen_d20}</b> (второй кубик {other}, {tag})")
+        else:
+            lines.append(f"┌ d20: <b>{chosen_d20}</b>")
+
+        ab_full = ABILITY_RU.get(self.ability_key, self.ability_key)
+        lines.append(f"├ {ab_full}: <b>{self.ability_mod_value:+d}</b>")
+        if self.proficiency_value:
+            lines.append(f"├ Мастерство: <b>{self.proficiency_value:+d}</b>")
+        for r in self.reasons:
+            lines.append(f"├ <i>{r}</i>")
         lines.append(
             f"└ Итого: <b>{self.total}</b> vs {dc_label} {self.dc} → "
             f"{icon} <b>{verdict}</b>{margin_str}"
@@ -530,7 +528,7 @@ def format_damage_breakdown(
         sides_label = f"{n}d?" if not dice_expr else dice_expr.split("+")[0].split("-")[0].strip()
         lines.append(f"┌ Кости {sides_label}: [{rolls_str}] = <b>{sum(rolls)}</b>")
     if flat_mod:
-        mod_label = ability_label or "модификатор"
+        mod_label = ability_label or "Модификатор"
         lines.append(f"├ {mod_label}: <b>{flat_mod:+d}</b>")
     if critical:
         lines.append("├ <i>крит — кости удвоены</i>")
@@ -1142,7 +1140,9 @@ def attempt_craft(
     skill = recipe.get("skill") or "ловкость рук"
     dc = int(recipe.get("dc") or 12)
     rich = make_skill_check(character, skill, dc, gs=gs)
-    roll_line = rich.format(kind="Крафт")
+    # Craft = moment of truth — show the full breakdown so the player
+    # understands why the attempt worked or failed.
+    roll_line = rich.format(kind="Крафт", verbose=True)
 
     # Consume components — full on success, half (rounded up) on failure.
     consumed: list[tuple[str, int]] = []

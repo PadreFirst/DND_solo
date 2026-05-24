@@ -626,7 +626,7 @@ async def cmd_unattune(message: Message, game: GameService, db: AsyncSession) ->
 # preferences into every system prompt. Without this the LLM forgets the
 # vibe by turn 3 and drifts toward generic epic-fantasy prose.
 
-_TOTAL_STEPS = 6
+_TOTAL_STEPS = 7
 
 _UNIVERSES = [
     ("fantasy", "🏰 Классическое фэнтези"),
@@ -662,6 +662,17 @@ _DIFFICULTIES = [
     ("normal", "⚖ Норма"),
     ("hardcore", "💀 Хардкор"),
 ]
+# Personal stake — the dramatic anchor. Single line that lives in every
+# system prompt forever and gives the LLM a wound to twist. Generic
+# enough to mix with any setting; custom answer always available.
+_STAKES = [
+    ("loved_one", "💔 Близкий человек, которого надо спасти"),
+    ("revenge",   "⚔ Месть за то, что отняли"),
+    ("debt",      "💀 Долг, который пришли взыскать"),
+    ("secret",    "🤐 Секрет, который нельзя раскрыть"),
+    ("home",      "🏚 Дом / клан / организация под угрозой"),
+    ("redemption","🩹 Грех, который надо искупить"),
+]
 
 
 def _label_for(table, key):
@@ -671,9 +682,16 @@ def _label_for(table, key):
 def _onboarding_kb(step_code: str, table, cols: int = 1):
     """Build a keyboard for a given wizard step. callback_data:
     `onb:<step_code>:<value_key>`. Always appends Back + Skip(default) buttons.
+    The first step also gets a Quick-Start escape hatch so impatient
+    players can blast through with defaults.
     """
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
     rows = []
+    if step_code == "uni":
+        rows.append([InlineKeyboardButton(
+            text="🚀 Быстрый старт (фэнтези, эпик, 16+, средний, норма)",
+            callback_data="onb:quick",
+        )])
     for i in range(0, len(table), cols):
         chunk = table[i:i + cols]
         rows.append([
@@ -688,13 +706,16 @@ def _onboarding_kb(step_code: str, table, cols: int = 1):
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-_STEP_ORDER = ["uni", "ton", "rat", "pac", "dif", "concept"]
+_STEP_ORDER = ["uni", "ton", "rat", "pac", "dif", "stk", "concept"]
 _STEP_TITLES = {
     "uni":     ("🌍 В каком мире играем?",           _UNIVERSES,    2),
     "ton":     ("🎭 Какая атмосфера?",                _TONES,        1),
     "rat":     ("🔞 Уровень контента?",               _RATINGS,      1),
     "pac":     ("⏱ Темп игры?",                       _PACES,        3),
     "dif":     ("🎯 Сложность?",                      _DIFFICULTIES, 3),
+    "stk":     ("💔 Что или кого ты боишься потерять?\n"
+                "<i>Это станет личной ставкой — ГМ будет крутить сюжет вокруг неё.</i>",
+                _STAKES,       1),
 }
 _STEP_FIELDS = {
     "uni": ("universe", "universe_key"),
@@ -702,10 +723,23 @@ _STEP_FIELDS = {
     "rat": ("rating", "rating_key"),
     "pac": ("pace", "pace_key"),
     "dif": ("difficulty", "difficulty_key"),
+    "stk": ("stake", "stake_key"),
 }
 _STEP_TABLES = {
     "uni": _UNIVERSES, "ton": _TONES, "rat": _RATINGS,
-    "pac": _PACES, "dif": _DIFFICULTIES,
+    "pac": _PACES, "dif": _DIFFICULTIES, "stk": _STAKES,
+}
+
+# Quick-start defaults — what the "🚀 Быстрый старт" button fills in so
+# impatient players can skip the whole wizard with one tap.
+_QUICKSTART_DEFAULTS = {
+    "universe": "🏰 Классическое фэнтези", "universe_key": "fantasy",
+    "tone":     "🦸 Эпическая",           "tone_key":     "epic",
+    "rating":   "16",                      "rating_key":   "16",
+    "pace":     "⚖ Средний",              "pace_key":     "medium",
+    "difficulty": "⚖ Норма",              "difficulty_key": "normal",
+    "stake":    "💔 Близкий человек, которого надо спасти",
+    "stake_key": "loved_one",
 }
 
 
@@ -834,7 +868,22 @@ async def on_onboarding_cancel(cb: CallbackQuery, game: GameService, db: AsyncSe
         pass
 
 
-@router.callback_query(F.data.regexp(r"^onb:(uni|ton|rat|pac|dif):"))
+@router.callback_query(F.data == "onb:quick")
+async def on_onboarding_quick(
+    cb: CallbackQuery, game: GameService, db: AsyncSession,
+) -> None:
+    """Skip the entire wizard with sensible defaults — jump straight to
+    'describe your character' so impatient players can play in 2 taps."""
+    await cb.answer("Быстрый старт 🚀")
+    user = await game.get_or_create_user(db, cb.from_user.id, cb.from_user.username)
+    gs = await game.ensure_session(db, user)
+    state = dict(_QUICKSTART_DEFAULTS)
+    state["step_code"] = "concept"
+    await _save_state(gs, state)
+    await _send_step(cb.message, "concept", state, edit=True)
+
+
+@router.callback_query(F.data.regexp(r"^onb:(uni|ton|rat|pac|dif|stk):"))
 async def on_onboarding_pick(
     cb: CallbackQuery, game: GameService, db: AsyncSession,
 ) -> None:
@@ -930,9 +979,13 @@ async def on_text(message: Message, game: GameService, db: AsyncSession) -> None
                     bits.append(f"Темп: {onb['pace']}")
                 if onb.get("difficulty"):
                     bits.append(f"Сложность: {onb['difficulty']}")
+                if onb.get("stake"):
+                    bits.append(f"Личная ставка: {onb['stake']}")
                 if bits:
                     concept = " | ".join(bits) + f"\nПерсонаж: {text}"
-                # Drop transient wizard cursor but keep prefs alive.
+                # Drop transient wizard cursor but keep prefs (incl. stake)
+                # alive in onboarding_state_json so build_context can
+                # replay them into every future system prompt.
                 onb.pop("step_code", None)
                 gs.onboarding_state_json = json.dumps(onb, ensure_ascii=False)
         async with typing_status(message.bot, message.chat.id):

@@ -202,6 +202,21 @@ class QuestEvent(BaseModel):
     step_key_completed: str = ""  # when action=complete_step
     reward_xp: int = 0
     reward_gold: int = 0
+    # Optional turn-budget for time-pressure quests. Code decrements every
+    # turn and auto-fails on 0. Surface as `⏳ Осталось N ходов` above options.
+    deadline_turns: int = 0
+
+
+class NPCAppearance(BaseModel):
+    """Named NPC introduced (or recurring) on this turn. Persisted in
+    npc_state so future turns can callback / reference them. Without this,
+    NPCs vanish after the 20-message window and the world feels disposable.
+    """
+    name: str = ""
+    role: str = ""           # short label: "информатор", "торговец", "капитан стражи"
+    faction: str = ""        # affiliation, drives reputation lookups
+    attitude: str = "neutral"  # hostile|cold|neutral|friendly|ally
+    notes: str = ""          # one-line memo so callbacks have hooks
 
 
 class CompanionSpec(BaseModel):
@@ -285,3 +300,10 @@ class TurnPlan(BaseModel):
     # Companions.
     add_companion: CompanionSpec | None = None
     remove_companion: str = ""
+    # Atomic scene goal — ≤80 chars, what the player must DO right now to
+    # move the current beat forward. Renders as `🎯 Сейчас: {beat}` above
+    # the options. Without this the player forgets why they're in the room.
+    current_beat: str = ""
+    # NPCs introduced or recurring this turn. Engine persists them into
+    # npc_state so we can replay "Recent NPCs:" in future contexts.
+    npc_appearances: list[NPCAppearance] = Field(default_factory=list)

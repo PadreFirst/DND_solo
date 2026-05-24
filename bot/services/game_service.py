@@ -48,7 +48,17 @@ _GM_PREFIX_RE = re.compile(r"^(гм|gm|мастер|вопрос)\s*:", re.IGNOR
 
 # How often to (re-)generate a compact summary of the adventure. Runs as a
 # background task so the player never waits for it.
-_SUMMARY_EVERY_N_TURNS = 10
+_SUMMARY_EVERY_N_TURNS = 5
+
+# How many turns must pass between two `quest_events.create` events before
+# we accept a new quest row. Stops the LLM from spamming the journal with
+# variations on the same theme ("Найти сестру" → "По следам сестры" →
+# "След крови" — all the same arc).
+_QUEST_CREATE_COOLDOWN_TURNS = 5
+
+# How many turns of inactivity before an active quest is auto-archived to
+# "stale" status. Keeps /quests scannable.
+_QUEST_STALE_TURNS = 20
 
 
 def _has_cond(character: Character, name: str) -> bool:
@@ -293,12 +303,9 @@ class GameService:
         abilities = json.loads(ch.abilities_json or "{}")
         recent = "\n".join(f"{m.role.upper()}: {m.content[:400]}" for m in msgs) or "(пусто)"
 
-        # Replay the player's onboarding preferences (tone / rating / pace /
-        # difficulty) into EVERY system prompt so the LLM doesn't drift away
-        # from the chosen vibe after a couple turns. Without this, an "18+
-        # тёмное фэнтези с хардкором" run starts feeling like a 13+ epic
-        # quest by turn 5.
+        # Replay onboarding preferences + personal stake into EVERY prompt.
         prefs_line = ""
+        stake_line = ""
         try:
             onb = json.loads(gs.onboarding_state_json or "{}")
         except Exception:
@@ -333,6 +340,56 @@ class GameService:
                 bits.append(f"Сложность: {diff} ({diff_hint.get(diff, '')})")
             if bits:
                 prefs_line = "PlayerPreferences (соблюдай в каждом ходе): " + " | ".join(bits) + "\n"
+            stake = (onb.get("stake") or "").strip()
+            if stake:
+                stake_line = (
+                    f"Личная ставка (что/кого игрок боится потерять): {stake}\n"
+                    f"  Привязывай к этой ставке каждый 3-й значимый поворот: "
+                    f"NPC напоминают о ней, локации дают намёки, квесты дают угрозу.\n"
+                )
+
+        # Recent NPCs — last 8 named NPCs sorted by recency. Without this
+        # block the LLM forgets characters as soon as their mention scrolls
+        # out of the 20-message window. Forces callbacks.
+        npcs = list(await db.scalars(
+            select(NPCState)
+            .where(NPCState.user_id == user.id, NPCState.is_companion == False)  # noqa: E712
+            .order_by(desc(NPCState.last_seen_turn), desc(NPCState.id))
+            .limit(8)
+        ))
+        npc_line = ""
+        if npcs:
+            npc_line = "Recent NPCs (реферни хотя бы одного раз в 3-5 ходов когда уместно):\n"
+            for n in npcs:
+                tag = f" †" if n.attitude == "dead" else ""
+                bits = [n.name]
+                if n.role:
+                    bits.append(n.role)
+                if n.faction:
+                    bits.append(f"фракция: {n.faction}")
+                if n.attitude and n.attitude not in ("neutral", "dead"):
+                    bits.append(n.attitude)
+                meta = f" ({', '.join(bits[1:])})" if len(bits) > 1 else ""
+                npc_line += f"  • {n.name}{tag}{meta}, last_seen turn {n.last_seen_turn}\n"
+
+        # Active quests — title + remaining deadline so the LLM can weave
+        # time pressure into the narrative.
+        quests = list(await db.scalars(
+            select(Quest).where(
+                Quest.user_id == user.id, Quest.status == "active",
+            ).limit(8)
+        ))
+        quest_line = ""
+        if quests:
+            quest_line = "Active Quests (используй update/complete_step вместо нового create если похожий есть):\n"
+            for q in quests:
+                d = int(q.deadline_turns_remaining or 0)
+                clock = f" ⏳{d}" if d > 0 else ""
+                tag = "⭐" if q.is_main else "·"
+                quest_line += f"  {tag} {q.title}{clock}\n"
+
+        beat_line = f"Current Beat (атомарная цель сейчас): {gs.current_beat}\n" if gs.current_beat else ""
+        summary_line = f"Adventure Summary: {gs.adventure_summary}\n" if gs.adventure_summary else ""
 
         return (
             f"Player: {ch.name} ({ch.race} {ch.char_class}, level {ch.level})\n"
@@ -342,15 +399,26 @@ class GameService:
             f"Conditions: {json.loads(ch.conditions_json or '[]')}\n"
             f"Location: {gs.current_location}\n"
             f"Location Description: {gs.current_location_description}\n"
-            f"Quest: {gs.active_quest_summary}\n"
+            f"{summary_line}"
+            f"{beat_line}"
+            f"{quest_line}"
+            f"{npc_line}"
             f"Universe: {gs.universe}; Style: {gs.narrative_style}; Weather:{gs.weather}; Time:{gs.time_of_day}\n"
             f"{prefs_line}"
+            f"{stake_line}"
             f"Recent Messages:\n{recent}"
         )
 
     @staticmethod
     def _ensure_options(options: list[str]) -> list[str]:
-        clean = [o.strip() for o in options if o and o.strip()]
+        # Strip LLM-added numbering ("1. Открыть", "2) Уйти", "- Бежать") —
+        # buttons already display 1-5, double-numbering is visual noise.
+        prefix_re = re.compile(r"^\s*(?:\d{1,2}[.\)]\s*|[-•·]\s*)")
+        clean = []
+        for o in options or []:
+            if not o or not o.strip():
+                continue
+            clean.append(prefix_re.sub("", o).strip())
         clean = clean[:5]
         if len(clean) < 3:
             clean = ["Осмотреться", "Действовать осторожно", "Поговорить с NPC"]
@@ -735,6 +803,10 @@ class GameService:
 
         # === PRE-NARRATIVE mechanics (goes BEFORE the story text) ===
         pre_lines: list[str] = []
+        # Tracked across roll resolution — set True if ANY roll the LLM
+        # asked for failed. Used after-the-fact to strip xp/items/abilities
+        # off the same-turn reward suite (fail-is-fail rule).
+        had_failed_roll = False
 
         if gs.combat_active and scene:
             if combat_started_now:
@@ -746,17 +818,14 @@ class GameService:
             )
             pre_lines.append(f"⚔ Враги на сцене: {enemies_line}")
 
-        # Passive perception auto-check (no d20). Runs BEFORE explicit rolls
-        # so the narrative can reference the hidden detail already known.
+        # Passive perception auto-check (no d20). Only surfaced on SUCCESS —
+        # failed PP silently does nothing. The old behavior leaked DC + the
+        # word "не замечено" in nearly every message, which read as constant
+        # mechanical noise without giving the player anything actionable.
         if plan.passive_perception_dc and plan.passive_perception_dc > 0:
             pp = engine.passive_perception(ch)
-            succ = pp >= plan.passive_perception_dc
-            pre_lines.append(
-                f"👁 Пассивная внимательность {pp} vs DC {plan.passive_perception_dc} — "
-                f"{'замечено' if succ else 'не замечено'}"
-            )
-            if succ and plan.passive_perception_reveal:
-                pre_lines.append(f"   ↳ {plan.passive_perception_reveal}")
+            if pp >= plan.passive_perception_dc and plan.passive_perception_reveal:
+                pre_lines.append(f"👁 <i>{plan.passive_perception_reveal}</i>")
 
         for rr in plan.rolls:
             if rr.type == "skill":
@@ -775,7 +844,11 @@ class GameService:
                     gs=gs,
                     reputation_score=rep_score,
                 )
+                # Skill checks default to a one-liner — full breakdown only
+                # on crit/fumble (auto-promoted by RichRoll.format).
                 pre_lines.append(rich.format(kind="Проверка"))
+                if not rich.success:
+                    had_failed_roll = True
             elif rr.type == "attack":
                 # Resolve weapon damage dice. Priority: explicit `damage_dice`
                 # from the LLM → match weapon in inventory → no damage at all.
@@ -820,6 +893,8 @@ class GameService:
                     gs=gs,
                 )
                 pre_lines.append(rich.format(kind="Атака"))
+                if not rich.success:
+                    had_failed_roll = True
 
                 if rich.success and dmg_expr:
                     chosen_d20 = rich.d20 if rich.d20_alt is None else (
@@ -857,7 +932,12 @@ class GameService:
                     advantage=rr.advantage, disadvantage=rr.disadvantage,
                     gs=gs,
                 )
-                pre_lines.append(rich.format(kind="Спасбросок"))
+                # Death-save-style rolls always get the full breakdown; for
+                # everything else the one-liner is enough. Saves are rarely
+                # numerous in a turn, so verbose stays readable.
+                pre_lines.append(rich.format(kind="Спасбросок", verbose=True))
+                if not rich.success:
+                    had_failed_roll = True
 
         for ea in plan.enemy_actions:
             atk_d20 = random.randint(1, 20)
@@ -924,6 +1004,36 @@ class GameService:
 
         # === POST-NARRATIVE mechanics (applied, summarised, shown after story) ===
         post_lines: list[str] = []
+
+        # Fail-is-fail enforcement (system_prompt rule #1). If any roll the
+        # LLM asked for failed this turn, strip same-turn rewards out of the
+        # plan: no XP, no new items, no granted recipes/abilities, no quest
+        # completions. Negative consequences (HP damage, lost gold, removed
+        # items) stay — that's the whole point of failure.
+        if had_failed_roll:
+            stripped: list[str] = []
+            if plan.xp_award > 0:
+                stripped.append(f"XP×{plan.xp_award}")
+                plan.xp_award = 0
+            if plan.inventory_changes:
+                kept = [c for c in plan.inventory_changes if c.action != "add"]
+                if len(kept) < len(plan.inventory_changes):
+                    stripped.append("новые предметы")
+                plan.inventory_changes = kept
+            if plan.grant_recipe:
+                stripped.append(f"рецепт {plan.grant_recipe.name}")
+                plan.grant_recipe = None
+            if plan.grant_ability:
+                stripped.append(f"способность {plan.grant_ability.name}")
+                plan.grant_ability = None
+            if plan.quest_events:
+                kept_q = [q for q in plan.quest_events
+                          if q.action not in ("complete", "complete_step")]
+                if len(kept_q) < len(plan.quest_events):
+                    stripped.append("завершение квеста")
+                plan.quest_events = kept_q
+            if stripped:
+                log.info("Fail-is-fail: stripped %s due to failed roll", stripped)
 
         if plan.direct_hp_change != 0:
             old, new = engine.apply_damage(ch, plan.direct_hp_change, damage_type="")
@@ -1068,6 +1178,19 @@ class GameService:
             if line:
                 post_lines.append(line)
 
+        # NPC registry — persist named appearances so they exist in DB
+        # beyond the 20-message sliding window. Without this, every callback
+        # ("Зек умер ради тебя") fails because the engine forgot Zек existed.
+        for npc_app in plan.npc_appearances or []:
+            await self._upsert_npc_appearance(db, user, gs, npc_app)
+
+        # Tension clock — decrement remaining turns on every active quest
+        # with a deadline_turns counter. On 0, auto-fail and surface it.
+        post_lines.extend(await self._tick_quest_deadlines(db, user))
+
+        # Auto-archive long-stale quests so the journal stays scannable.
+        await self._archive_stale_quests(db, user, gs.turn_number)
+
         # Clean up dead enemies + close combat if the scene is empty.
         scene = [e for e in scene if int(e.get("hp_current", 0) or 0) > 0]
         if gs.combat_active and not scene:
@@ -1095,9 +1218,18 @@ class GameService:
         pre_block = "\n".join(pre_lines).strip()
         post_block = "\n".join(post_lines).strip()
 
-        # Order: MECHANICS (pre) → NARRATIVE → AFTER-EFFECTS. User explicitly
-        # asked to see rolls & damage BEFORE the story text.
-        parts = [x for x in (pre_block, body, post_block) if x]
+        # Beat-line — atomic "do this RIGHT NOW" goal that lives between
+        # the after-effects and the options. Persistent reminder of what
+        # the player should be trying to accomplish in this scene.
+        beat = (plan.current_beat or "").strip()
+        # Persist so /quest can echo it and the next turn's context can replay it.
+        if beat:
+            gs.current_beat = beat[:120]
+        beat_line = f"🎯 <b>Сейчас:</b> {gs.current_beat}" if gs.current_beat else ""
+
+        # Order: MECHANICS (pre) → NARRATIVE → AFTER-EFFECTS → BEAT-LINE.
+        # User explicitly asked to see rolls & damage BEFORE the story text.
+        parts = [x for x in (pre_block, body, post_block, beat_line) if x]
         text = "\n\n".join(parts)
 
         await self.save_message(db, user.id, "assistant", text)
@@ -1612,6 +1744,23 @@ class GameService:
 
     # ─── Quest journal ────────────────────────────────────────────────
 
+    @staticmethod
+    def _quest_title_similar(a: str, b: str) -> bool:
+        """Loose match for quest titles. Catches the 'След крови / По следам
+        сестры / След Чёрного Солнца' family — same arc, different wording.
+        Strategy: lowercase + split into word stems (≥4 chars) and check
+        whether ≥1 stem overlaps. Cheap heuristic, no NLP needed.
+        """
+        def stems(s: str) -> set[str]:
+            return {
+                w[:5] for w in re.findall(r"[\wа-яё]+", (s or "").lower())
+                if len(w) >= 4
+            }
+        sa, sb = stems(a), stems(b)
+        if not sa or not sb:
+            return False
+        return bool(sa & sb)
+
     async def _apply_quest_event(
         self, db: AsyncSession, user: User, event: QuestEvent,
     ) -> str:
@@ -1629,10 +1778,38 @@ class GameService:
             None,
         )
         action = (event.action or "create").lower()
+        gs = await self.ensure_session(db, user)
+        cur_turn = int(gs.turn_number or 0)
 
         if action == "create":
             if row:
-                return ""  # idempotent — don't duplicate
+                return ""  # exact title match — silent idempotency
+            # Fuzzy merge: if there's an ACTIVE quest with overlapping
+            # stems, treat this as an update rather than a new quest. Stops
+            # the LLM from spawning "След крови" / "По следам сестры" as
+            # two parallel quests when they're the same arc.
+            for q in existing:
+                if q.status != "active":
+                    continue
+                if self._quest_title_similar(event.title, q.title):
+                    if event.description and event.description != q.description:
+                        q.description = (q.description + "\n" + event.description).strip()[:2000]
+                    if event.steps:
+                        q.steps_json = json.dumps(
+                            [s.model_dump() for s in event.steps],
+                            ensure_ascii=False,
+                        )
+                    q.last_updated_turn = cur_turn
+                    return f"📝 Квест обновлён: <b>{q.title}</b>"
+
+            # Cooldown — limit how often new quests can spawn. Active GM
+            # tends to over-generate; we throttle.
+            last_create = int(gs.last_quest_create_turn or 0)
+            if cur_turn > 0 and cur_turn - last_create < _QUEST_CREATE_COOLDOWN_TURNS:
+                log.info("Quest create blocked by cooldown (turn %d, last %d): %s",
+                         cur_turn, last_create, event.title)
+                return ""
+
             q = Quest(
                 user_id=user.id,
                 title=event.title[:255],
@@ -1645,11 +1822,18 @@ class GameService:
                 ),
                 reward_xp=int(event.reward_xp or 0),
                 reward_gold=int(event.reward_gold or 0),
+                deadline_turns_remaining=max(0, int(event.deadline_turns or 0)),
+                last_updated_turn=cur_turn,
             )
             db.add(q)
             await db.flush()
+            gs.last_quest_create_turn = cur_turn
             icon = "📜" if event.is_main else "📝"
-            return f"{icon} Новый квест: <b>{event.title}</b>"
+            deadline_str = (
+                f" ⏳ {event.deadline_turns} ходов"
+                if event.deadline_turns and event.deadline_turns > 0 else ""
+            )
+            return f"{icon} Новый квест: <b>{event.title}</b>{deadline_str}"
 
         if not row:
             # silently ignore updates to nonexistent quests
@@ -1675,10 +1859,12 @@ class GameService:
                     s["done"] = True
                     break
             row.steps_json = json.dumps(steps, ensure_ascii=False)
+            row.last_updated_turn = cur_turn
             return f"✓ Шаг квеста «{event.title}»: {event.step_key_completed}"
 
         if action == "complete":
             row.status = "completed"
+            row.last_updated_turn = cur_turn
             lines = [f"🏆 Квест завершён: <b>{event.title}</b>"]
             if row.reward_xp:
                 ch = await self.ensure_character(db, user)
@@ -1692,9 +1878,104 @@ class GameService:
 
         if action == "fail":
             row.status = "failed"
+            row.last_updated_turn = cur_turn
             return f"💀 Квест провален: <b>{event.title}</b>"
 
         return ""
+
+    async def _upsert_npc_appearance(
+        self, db: AsyncSession, user: User, gs: GameSession, app,
+    ) -> None:
+        """Persist (or update) a named NPC seen this turn. Without this the
+        engine forgets named characters as soon as they fall out of the
+        20-message sliding window, killing callbacks.
+        """
+        name = (getattr(app, "name", "") or "").strip()
+        if not name:
+            return
+        row = await db.scalar(
+            select(NPCState).where(
+                NPCState.user_id == user.id,
+                NPCState.name == name,
+            )
+        )
+        cur_turn = int(gs.turn_number or 0)
+        if not row:
+            row = NPCState(
+                user_id=user.id,
+                name=name[:255],
+                current_location=gs.current_location,
+                role=(getattr(app, "role", "") or "")[:120],
+                attitude=(getattr(app, "attitude", "") or "neutral")[:40],
+                notes=(getattr(app, "notes", "") or "")[:1000],
+                faction=(getattr(app, "faction", "") or "")[:120],
+                last_seen_turn=cur_turn,
+            )
+            db.add(row)
+            await db.flush()
+            return
+        # Update — pull through latest details, refresh last_seen so the
+        # context-replay ranks them recent.
+        row.current_location = gs.current_location or row.current_location
+        if getattr(app, "role", ""):
+            row.role = (app.role or "")[:120]
+        if getattr(app, "attitude", ""):
+            row.attitude = (app.attitude or "neutral")[:40]
+        if getattr(app, "faction", ""):
+            row.faction = (app.faction or "")[:120]
+        if getattr(app, "notes", ""):
+            # Append fresh notes without losing the old ones — but bound.
+            merged = ((row.notes or "") + "\n" + (app.notes or "")).strip()
+            row.notes = merged[-1000:]
+        row.last_seen_turn = cur_turn
+
+    async def _tick_quest_deadlines(
+        self, db: AsyncSession, user: User,
+    ) -> list[str]:
+        """Decrement deadline counters on active quests. On 0 → fail.
+        Returns chat-facing lines for whatever happened.
+        """
+        lines: list[str] = []
+        gs = await self.ensure_session(db, user)
+        cur_turn = int(gs.turn_number or 0)
+        active = list(await db.scalars(
+            select(Quest).where(
+                Quest.user_id == user.id, Quest.status == "active",
+            )
+        ))
+        for q in active:
+            d = int(q.deadline_turns_remaining or 0)
+            if d <= 0:
+                continue
+            d -= 1
+            q.deadline_turns_remaining = d
+            if d == 0:
+                q.status = "failed"
+                q.last_updated_turn = cur_turn
+                lines.append(f"⏳💀 Время вышло — квест провален: <b>{q.title}</b>")
+            elif d <= 3:
+                # Loud warning when the clock is about to run out.
+                lines.append(f"⏳ <b>{q.title}</b> — осталось {d} ход(ов)")
+        return lines
+
+    async def _archive_stale_quests(
+        self, db: AsyncSession, user: User, cur_turn: int,
+    ) -> None:
+        """Demote quests that haven't moved in _QUEST_STALE_TURNS turns from
+        'active' to 'stale'. Keeps /quests scannable.
+        """
+        if cur_turn < _QUEST_STALE_TURNS:
+            return
+        cutoff = cur_turn - _QUEST_STALE_TURNS
+        active = list(await db.scalars(
+            select(Quest).where(
+                Quest.user_id == user.id, Quest.status == "active",
+            )
+        ))
+        for q in active:
+            last = int(q.last_updated_turn or 0)
+            if last and last < cutoff:
+                q.status = "stale"
 
     async def format_quest_journal(self, db: AsyncSession, user: User) -> str:
         rows = list(await db.scalars(

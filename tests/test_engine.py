@@ -79,12 +79,16 @@ class TestSkillCheck:
     def test_format_output(self):
         ch = FakeCharacter()
         rr = make_skill_check(ch, "атлетика", dc=12)
+        # Default = one-liner (verbose=False).
         text = rr.format(kind="Проверка")
         assert "Проверка" in text
-        assert "d20:" in text
-        assert "Сила" in text
-        assert "Мастерство" in text
         assert "DC 12" in text
+        assert "Успех" in text or "Провал" in text
+        # Verbose mode renders the full breakdown.
+        verbose = rr.format(kind="Проверка", verbose=True)
+        assert "d20:" in verbose
+        assert "Сила" in verbose
+        assert "Мастерство" in verbose
 
 
 class TestAttackRoll:
@@ -175,19 +179,18 @@ class TestRichRollFormat:
             ability_key="WIS", ability_mod_value=1, proficiency_value=2,
             total=17, dc=12, success=True,
         )
+        # Default = compact one-liner (verbose=False).
         text = rr.format(kind="Проверка")
-        # Multi-line breakdown — header, d20, ability, proficiency, total.
         assert "Проверка: Внимательность" in text
-        assert "d20:" in text
-        assert "14" in text
-        assert "Мудрость" in text
-        assert "+1" in text
-        assert "Мастерство" in text
-        assert "+2" in text
         assert "17" in text and "DC 12" in text
         assert "Успех" in text
-        # Margin display — 17 vs DC 12 = on 5 more.
         assert "на 5 больше" in text
+        # Verbose breakdown — header, d20, ability, proficiency, total.
+        v = rr.format(kind="Проверка", verbose=True)
+        assert "d20:" in v
+        assert "14" in v
+        assert "Мудрость" in v and "+1" in v
+        assert "Мастерство" in v and "+2" in v
 
     def test_attack_format(self):
         rr = RichRoll(
@@ -208,7 +211,8 @@ class TestRichRollFormat:
             ability_key="DEX", ability_mod_value=2, proficiency_value=0,
             total=16, dc=15, success=True,
         )
-        text = rr.format(kind="Проверка")
+        # Advantage/disadvantage details live in the verbose breakdown.
+        text = rr.format(kind="Проверка", verbose=True)
         assert "преимущество" in text
         assert "14" in text and "8" in text
 
@@ -219,11 +223,13 @@ class TestRichRollFormat:
             ability_key="CHA", ability_mod_value=-1, proficiency_value=0,
             total=9, dc=12, success=False,
         )
+        # Failure verdict + margin show up in the one-liner.
         text = rr.format(kind="Проверка")
-        assert "Харизма" in text and "-1" in text
         assert "Провал" in text
-        # Margin on failure should show what was missing.
         assert "не хватило" in text
+        # Negative-mod detail lives in the verbose breakdown.
+        v = rr.format(kind="Проверка", verbose=True)
+        assert "Харизма" in v and "-1" in v
 
     def test_zero_mod(self):
         rr = RichRoll(
@@ -232,8 +238,9 @@ class TestRichRollFormat:
             ability_key="INT", ability_mod_value=0, proficiency_value=0,
             total=10, dc=10, success=True,
         )
-        text = rr.format(kind="Проверка")
-        assert "Интеллект" in text and "+0" in text
+        # +0 mod label only appears in verbose mode.
+        v = rr.format(kind="Проверка", verbose=True)
+        assert "Интеллект" in v and "+0" in v
 
     def test_crit_attack_format(self):
         """Natural 20 on an attack must show a big visual CRIT marker."""
