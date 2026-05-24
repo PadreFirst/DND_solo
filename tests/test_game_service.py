@@ -664,6 +664,158 @@ class TestTensionClock:
         assert any("Время вышло" in l for l in lines)
 
 
+class TestLowHpHint:
+    """Hint surfaces consumables when HP ≤ 25%."""
+
+    def _ch(self, hp_cur, hp_max, inv):
+        from bot.models import Character
+        return Character(
+            user_id=1, name="Тест", hp_current=hp_cur, hp_max=hp_max,
+            inventory_json=json.dumps(inv, ensure_ascii=False),
+        )
+
+    def test_no_hint_above_threshold(self):
+        ch = self._ch(10, 12, [{"name": "Стимпак", "emoji": "💉", "type": "consumable", "quantity": 2}])
+        assert GameService._low_hp_consumable_hint(ch) == ""
+
+    def test_hint_at_low_hp_with_heal(self):
+        ch = self._ch(2, 12, [{"name": "Стимпак", "emoji": "💉", "type": "consumable", "quantity": 2}])
+        out = GameService._low_hp_consumable_hint(ch)
+        assert "Низкое здоровье" in out
+        assert "Стимпак" in out
+        assert "×2" in out
+
+    def test_no_hint_when_low_but_no_heals(self):
+        ch = self._ch(2, 12, [{"name": "Меч", "emoji": "🗡", "type": "weapon", "quantity": 1}])
+        assert GameService._low_hp_consumable_hint(ch) == ""
+
+    def test_hint_matches_various_heal_names(self):
+        ch = self._ch(2, 12, [
+            {"name": "Зелье лечения", "type": "consumable", "quantity": 1},
+            {"name": "Бинты", "type": "consumable", "quantity": 3},
+        ])
+        out = GameService._low_hp_consumable_hint(ch)
+        assert "Зелье лечения" in out
+        assert "Бинты" in out
+
+
+@pytest.mark.asyncio
+class TestAutoSeedQuest:
+    """Auto-create main quest when 0 active quests by turn 3+."""
+
+    async def test_seeds_from_beat(self, db):
+        from bot.models import Quest
+
+        gemini = AsyncMock()
+        svc = GameService(gemini)
+        user = User(telegram_id=70100, username="auto_quest")
+        db.add(user)
+        await db.flush()
+        gs = await svc.ensure_session(db, user)
+        gs.turn_number = 4
+        gs.current_beat = "Узнать у Слая адрес сестры"
+
+        await svc._auto_seed_quest_from_beat(db, user, gs, TurnPlan(quest_update=""))
+        rows = list(await db.scalars(select(Quest).where(Quest.user_id == user.id)))
+        assert len(rows) == 1
+        assert rows[0].is_main is True
+        assert "Слая" in rows[0].title
+
+    async def test_skips_if_quest_exists(self, db):
+        from bot.models import Quest
+
+        gemini = AsyncMock()
+        svc = GameService(gemini)
+        user = User(telegram_id=70101, username="auto_quest2")
+        db.add(user)
+        await db.flush()
+        gs = await svc.ensure_session(db, user)
+        gs.turn_number = 5
+        gs.current_beat = "Что-то делать"
+        q = Quest(user_id=user.id, title="Уже есть", status="active", is_main=True)
+        db.add(q)
+        await db.flush()
+
+        await svc._auto_seed_quest_from_beat(db, user, gs, TurnPlan())
+        rows = list(await db.scalars(select(Quest).where(Quest.user_id == user.id)))
+        assert len(rows) == 1  # no duplicate
+
+    async def test_skips_under_turn_3(self, db):
+        from bot.models import Quest
+
+        gemini = AsyncMock()
+        svc = GameService(gemini)
+        user = User(telegram_id=70102, username="auto_quest3")
+        db.add(user)
+        await db.flush()
+        gs = await svc.ensure_session(db, user)
+        gs.turn_number = 2
+        gs.current_beat = "Что-то делать"
+
+        await svc._auto_seed_quest_from_beat(db, user, gs, TurnPlan())
+        rows = list(await db.scalars(select(Quest).where(Quest.user_id == user.id)))
+        assert rows == []
+
+
+class TestPreviewHelpers:
+    """Pre-roll previews show formula + chance% before the d20 resolves."""
+
+    def test_preview_skill_check(self):
+        from bot.models import Character
+        from bot.services.engine import preview_skill_check
+
+        ch = Character(
+            user_id=1, name="T", hp_current=10, hp_max=10,
+            abilities_json=json.dumps({"STR": 10, "DEX": 14, "CON": 12,
+                                       "INT": 10, "WIS": 12, "CHA": 8}),
+            skill_proficiencies_json=json.dumps(["скрытность"]),
+            proficiency_bonus=2,
+        )
+        out = preview_skill_check(ch, "скрытность", 15)
+        assert "Сейчас бросок" in out
+        assert "скрытность" in out
+        assert "Ловкость" in out
+        assert "+2" in out  # ability mod
+        assert "DC 15" in out
+        assert "%" in out  # chance %
+
+
+class TestInventoryGrouping:
+    def test_groups_by_type(self):
+        from bot.models import Character
+
+        ch = Character(
+            user_id=1, name="T", gold=10,
+            inventory_json=json.dumps([
+                {"name": "Меч", "emoji": "🗡", "type": "weapon", "quantity": 1, "is_equipped": True, "damage_dice": "1d8"},
+                {"name": "Лук", "emoji": "🏹", "type": "ranged", "quantity": 1, "damage_dice": "1d6"},
+                {"name": "Кольчуга", "emoji": "👕", "type": "armor", "quantity": 1, "is_equipped": True},
+                {"name": "Зелье лечения", "emoji": "🧪", "type": "consumable", "quantity": 2},
+                {"name": "Свиток сестры", "emoji": "📜", "type": "quest", "quantity": 1},
+                {"name": "Верёвка", "emoji": "🪢", "type": "misc", "quantity": 1},
+            ]),
+        )
+        out = GameService.format_inventory_detailed(ch)
+        # All categories should appear in canonical order.
+        assert "Оружие ближнего" in out
+        assert "Оружие дальнего" in out
+        assert "Броня" in out
+        assert "Расходники" in out
+        assert "Квестовые" in out
+        assert "Прочее" in out
+        # Categories should appear in stable order.
+        idx_melee = out.index("Оружие ближнего")
+        idx_armor = out.index("Броня")
+        idx_consum = out.index("Расходники")
+        assert idx_melee < idx_armor < idx_consum
+
+    def test_empty_inventory(self):
+        from bot.models import Character
+        ch = Character(user_id=1, name="T", inventory_json="[]")
+        out = GameService.format_inventory_detailed(ch)
+        assert "пуст" in out.lower()
+
+
 class TestOptionPrefixStripping:
     def test_strips_numbered_prefix(self):
         opts = GameService._ensure_options([

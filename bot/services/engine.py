@@ -274,6 +274,80 @@ def ability_mod(character: Character, key: str) -> int:
     return (score - 10) // 2
 
 
+def _hit_chance_pct(modifier_total: int, dc: int) -> int:
+    """Best-of-d20 hit chance vs target DC. Single d20, no adv/dis.
+    chance% = (21 - max(1, dc - mod)) * 5, clamped 5..95.
+    """
+    need = dc - modifier_total
+    if need <= 1:
+        return 95
+    if need > 20:
+        return 5
+    return max(5, min(95, (21 - need) * 5))
+
+
+def preview_skill_check(
+    character: Character,
+    skill_name: str,
+    dc: int,
+) -> str:
+    """Pre-roll preview string for a skill check. Shown BEFORE the d20
+    resolves so the player sees what's being thrown + their odds. UX_TZ §3.
+    """
+    key = SKILL_TO_ABILITY.get((skill_name or "").strip().lower(), "WIS")
+    mod = ability_mod(character, key)
+    profs = [s.lower() for s in json.loads(character.skill_proficiencies_json or "[]")]
+    prof = character.proficiency_bonus if (skill_name or "").strip().lower() in profs else 0
+    total = mod + prof
+    chance = _hit_chance_pct(total, dc)
+    ab_short = ABILITY_RU.get(key, key)
+    prof_tag = f" + Мастерство {prof:+d}" if prof else ""
+    return (
+        f"🎯 <i>Сейчас бросок: <b>{skill_name}</b> — "
+        f"d20 + {ab_short} {mod:+d}{prof_tag} vs DC {dc} "
+        f"(~{chance}% успеха)</i>"
+    )
+
+
+def preview_attack(
+    character: Character,
+    target_ac: int,
+    *,
+    ability_key: str = "STR",
+    label: str = "атака",
+    target_name: str = "",
+) -> str:
+    mod = ability_mod(character, ability_key)
+    prof = character.proficiency_bonus
+    total = mod + prof
+    chance = _hit_chance_pct(total, target_ac)
+    ab_short = ABILITY_RU.get(ability_key, ability_key)
+    target_tag = f" по <b>{target_name}</b>" if target_name else ""
+    return (
+        f"🎯 <i>Сейчас бросок: <b>{label}</b>{target_tag} — "
+        f"d20 + {ab_short} {mod:+d} + Мастерство {prof:+d} vs КД {target_ac} "
+        f"(~{chance}% попасть)</i>"
+    )
+
+
+def preview_save(
+    character: Character,
+    ability_key: str,
+    dc: int,
+) -> str:
+    mod = ability_mod(character, ability_key)
+    save_profs = [s.upper() for s in json.loads(character.saving_throw_proficiencies_json or "[]")]
+    prof = character.proficiency_bonus if ability_key.upper() in save_profs else 0
+    total = mod + prof
+    chance = _hit_chance_pct(total, dc)
+    ab_full = ABILITY_RU.get(ability_key.upper(), ability_key)
+    prof_tag = f" + Мастерство {prof:+d}" if prof else ""
+    return (
+        f"🎯 <i>Спасбросок: <b>{ab_full}</b> — d20 + {ab_full} {mod:+d}{prof_tag} "
+        f"vs DC {dc} (~{chance}% устоять)</i>"
+    )
+
+
 def make_skill_check(
     character: Character,
     skill_name: str,

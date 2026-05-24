@@ -73,6 +73,10 @@ class Character(Base):
     # HP=0 and not stabilized/dead. Stored here so it survives between turns.
     death_saves_success: Mapped[int] = mapped_column(Integer, default=0)
     death_saves_failure: Mapped[int] = mapped_column(Integer, default=0)
+    # Consecutive turns spent unconscious — counted across the death-save
+    # loop. On N+ turns the engine ends combat (the enemies don't sit
+    # around watching a corpse bleed out forever).
+    consecutive_death_turns: Mapped[int] = mapped_column(Integer, default=0)
 
     # {"resist":["fire"],"immune":["poison"],"vulnerable":["cold"]}
     resistances_json: Mapped[str] = mapped_column(Text, default='{"resist":[],"immune":[],"vulnerable":[]}')

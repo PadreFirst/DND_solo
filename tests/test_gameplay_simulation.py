@@ -62,8 +62,8 @@ class TestFullGameplaySession:
 
         assert gs.turn_number == 2
         assert "старик" in out.text.lower()
-        # Dice block uses 🎲 normally, 💥 on a nat20, 💀 on a nat1 — accept any.
-        assert any(m in out.text for m in ("🎲", "💥", "💀"))
+        # Dice / preview block — 🎲 normal roll, 💥 nat20, 💀 nat1, or 🎯 pre-roll preview.
+        assert any(m in out.text for m in ("🎲", "💥", "💀", "🎯"))
         assert "проницательность" in out.text.lower()
 
         # --- Step 4: Player asks a question ---
@@ -93,7 +93,8 @@ class TestFullGameplaySession:
 
         assert gs.turn_number == 4
         assert "Бой" in out.text or "бой" in out.text or "нож" in out.text
-        assert "🎲" in out.text
+        # Dice / preview block — 🎲 normal roll, 💥 nat20, 💀 nat1, or 🎯 pre-roll preview.
+        assert any(m in out.text for m in ("🎲", "💥", "💀", "🎯"))
 
         # --- Step 6: Use healing potion ---
         gemini.generate_turn_plan = AsyncMock(return_value=TurnPlan(

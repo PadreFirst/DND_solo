@@ -653,10 +653,35 @@ class GameService:
         inv = json.loads(ch.inventory_json or "[]")
         if not inv:
             return "🎒 <b>Инвентарь пуст.</b>"
-        lines = ["🎒 <b>Инвентарь</b>"]
+
+        # Group by type. Order: weapons / armor / consumables / quest / misc.
+        # By 10-15 turns the inventory grows to 8+ items and a flat list
+        # becomes hard to scan during a combat scene.
+        order = [
+            ("weapon",     "⚔ <b>Оружие ближнего боя</b>"),
+            ("ranged",     "🏹 <b>Оружие дальнего боя</b>"),
+            ("armor",      "🛡 <b>Броня и одежда</b>"),
+            ("consumable", "🧪 <b>Расходники</b>"),
+            ("quest",      "🎗 <b>Квестовые предметы</b>"),
+            ("misc",       "🎒 <b>Прочее</b>"),
+        ]
+        bucket: dict[str, list[dict]] = {k: [] for k, _ in order}
         for it in inv:
-            lines.append(" • " + _format_inventory_item(it, short=False))
-        lines.append(f"\n💰 Золото: {ch.gold}")
+            t = (it.get("type") or "misc").lower()
+            if t not in bucket:
+                t = "misc"
+            bucket[t].append(it)
+
+        lines: list[str] = ["🎒 <b>Инвентарь</b>"]
+        for key, title in order:
+            items = bucket[key]
+            if not items:
+                continue
+            lines.append("")
+            lines.append(title)
+            for it in items:
+                lines.append(" • " + _format_inventory_item(it, short=False))
+        lines.append(f"\n💰 <b>Золото:</b> {ch.gold}")
         return "\n".join(lines)
 
     @staticmethod
@@ -886,6 +911,10 @@ class GameService:
                     gs=gs,
                     reputation_score=rep_score,
                 )
+                # Pre-roll preview — show the formula + chance BEFORE the
+                # d20 resolves. Lets the player feel the stakes ("60% шанс
+                # успеха") instead of finding out the DC after the fact.
+                pre_lines.append(engine.preview_skill_check(ch, rr.label, rr.dc))
                 # Skill checks default to a one-liner — full breakdown only
                 # on crit/fumble (auto-promoted by RichRoll.format).
                 pre_lines.append(rich.format(kind="Проверка"))
@@ -921,12 +950,20 @@ class GameService:
                 # thrown BEFORE the result lands (UX brief #3). One compact
                 # block, not a separate message.
                 target_idx_preview = _find_scene_target(scene, rr.target)
+                target_name_for_preview = ""
+                target_ac_for_preview = rr.dc
                 if target_idx_preview is not None:
                     tgt = scene[target_idx_preview]
+                    target_name_for_preview = tgt.get("name", "Враг")
+                    target_ac_for_preview = int(tgt.get("ac", rr.dc) or rr.dc)
                     pre_lines.append(
                         f"🎯 <b>Прицеливаюсь:</b> {tgt.get('name', 'Враг')} "
                         f"(🛡 КД {tgt.get('ac', '?')}, ♥ {tgt.get('hp_current', '?')}/{tgt.get('hp_max', '?')})"
                     )
+                pre_lines.append(engine.preview_attack(
+                    ch, target_ac_for_preview, ability_key=ability_key,
+                    label=rr.label or "атака", target_name=target_name_for_preview,
+                ))
 
                 rich = engine.make_attack_roll(
                     ch, rr.dc, ability_key=ability_key,
@@ -969,6 +1006,7 @@ class GameService:
                         if hp_after == 0:
                             pre_lines.append(f"☠ <b>{entry.get('name', 'Враг')} повержен!</b>")
             elif rr.type == "save":
+                pre_lines.append(engine.preview_save(ch, rr.ability or "CON", rr.dc))
                 rich = engine.make_save_roll(
                     ch, rr.ability or "CON", rr.dc,
                     advantage=rr.advantage, disadvantage=rr.disadvantage,
@@ -1233,6 +1271,18 @@ class GameService:
         # Auto-archive long-stale quests so the journal stays scannable.
         await self._archive_stale_quests(db, user, gs.turn_number)
 
+        # Auto-quest safety net — if the player is several turns in with
+        # NO active quests and the LLM gave us a beat, mint a main quest
+        # from the beat so /quests isn't empty. Prod data showed 0 quests
+        # after 14 turns despite the GM clearly chasing a story arc.
+        await self._auto_seed_quest_from_beat(db, user, gs, plan)
+
+        # Low-HP hint — at ≤25% surface available consumables so the player
+        # remembers to /use the stimpak instead of dying in the death loop.
+        hint = self._low_hp_consumable_hint(ch)
+        if hint:
+            post_lines.append(hint)
+
         # Clean up dead enemies + close combat if the scene is empty.
         scene = [e for e in scene if int(e.get("hp_current", 0) or 0) > 0]
         if gs.combat_active and not scene:
@@ -1285,10 +1335,12 @@ class GameService:
         Match TZ: "При HP = 0 персонаж без сознания, каждый ход бросает 1d20".
         """
         result = engine.roll_death_save(ch)
+        ch.consecutive_death_turns = int(ch.consecutive_death_turns or 0) + 1
         lines: list[str] = [result.format()]
 
         if result.woke_up:
             _remove_cond(ch, "unconscious")
+            ch.consecutive_death_turns = 0
             lines.append("✨ Ты приходишь в себя с 1 HP. Можешь действовать.")
             opts = self._ensure_options([
                 "Подняться и оценить обстановку",
@@ -1298,6 +1350,7 @@ class GameService:
             ])
         elif result.dead:
             _add_cond(ch, "dead")
+            ch.consecutive_death_turns = 0
             gs.combat_active = False
             gs.scene_state_json = "[]"
             lines.append("☠ <b>Персонаж мёртв.</b>")
@@ -1333,6 +1386,23 @@ class GameService:
                 "Позвать на помощь (если рядом есть союзники)",
                 "✏ Написать свой вариант",
             ]
+
+        # If the player has been unconscious for 3+ consecutive turns and
+        # combat was still flagged active, end it. Enemies don't sit around
+        # forever watching a body bleed out. Without this, combat_active
+        # stays true into the next scene and confuses every status line.
+        if (
+            gs.combat_active
+            and int(ch.consecutive_death_turns or 0) >= 3
+            and not result.woke_up
+            and not result.dead
+        ):
+            engine.end_combat(gs)
+            gs.scene_state_json = "[]"
+            lines.append(
+                "🏳 <i>Враги решают, что добивать тебя — пустая трата времени, "
+                "и отступают. Бой окончен — ты остаёшься без сознания на месте.</i>"
+            )
 
         gs.last_options_json = json.dumps(opts, ensure_ascii=False)
         text = "\n".join(lines)
@@ -2080,6 +2150,77 @@ class GameService:
                 # Loud warning when the clock is about to run out.
                 lines.append(f"⏳ <b>{q.title}</b> — осталось {d} ход(ов)")
         return lines
+
+    async def _auto_seed_quest_from_beat(
+        self, db: AsyncSession, user: User, gs: GameSession, plan: TurnPlan,
+    ) -> None:
+        """When the GM keeps narrating but hasn't created a single quest by
+        turn 3, mint a main quest from the current beat so /quests isn't
+        empty. Without this, players who never see a numeric goal feel
+        like they're drifting (real prod data: 14-turn session, 0 quests).
+        """
+        cur_turn = int(gs.turn_number or 0)
+        if cur_turn < 3:
+            return
+        existing = list(await db.scalars(
+            select(Quest).where(
+                Quest.user_id == user.id, Quest.status == "active",
+            )
+        ))
+        if existing:
+            return  # at least one active quest, don't intrude
+        # Need SOMETHING to base the quest on. Prefer the LLM's quest_update
+        # field (full sentence), fall back to the beat (short).
+        seed = (plan.quest_update or "").strip() or (gs.current_beat or "").strip()
+        if not seed:
+            return
+        title = seed[:80].rstrip(".,!?;:") + ("…" if len(seed) > 80 else "")
+        q = Quest(
+            user_id=user.id,
+            title=title or "Главная задача",
+            description=seed[:1000],
+            is_main=True,
+            status="active",
+            last_updated_turn=cur_turn,
+        )
+        db.add(q)
+        await db.flush()
+        gs.last_quest_create_turn = cur_turn
+        # No post_lines append — silent; the journal will surface it.
+
+    @staticmethod
+    def _low_hp_consumable_hint(ch: Character) -> str:
+        """When the character is at ≤25% HP, surface healing consumables
+        in inventory so the player notices them. Self-play showed players
+        bleeding out with 2 stimpaks unused — the bot never reminded them.
+        """
+        hp_max = max(1, int(ch.hp_max or 1))
+        if ch.hp_current / hp_max > 0.25:
+            return ""
+        try:
+            inv = json.loads(ch.inventory_json or "[]")
+        except Exception:
+            inv = []
+        HEAL_KEYWORDS = (
+            "стимп", "зелье леч", "аптеч", "медкит", "бинт",
+            "регенер", "инъекц", "стим", "healing potion",
+        )
+        heals = []
+        for it in inv:
+            name = (it.get("name") or "").strip()
+            if not name:
+                continue
+            if any(k in name.lower() for k in HEAL_KEYWORDS):
+                qty = int(it.get("quantity", 1) or 1)
+                emoji = it.get("emoji") or "💊"
+                heals.append(f"{emoji} {name} ×{qty}")
+        if not heals:
+            return ""
+        return (
+            f"⚠ <b>Низкое здоровье ({ch.hp_current}/{ch.hp_max} HP).</b> "
+            f"Под рукой: {', '.join(heals)}. "
+            f"<i>Используй: «выпиваю зелье», «колю стимпак», или /use.</i>"
+        )
 
     async def _archive_stale_quests(
         self, db: AsyncSession, user: User, cur_turn: int,

@@ -61,6 +61,7 @@ _SOFT_MIGRATIONS: tuple[str, ...] = (
     "ALTER TABLE npc_state ADD COLUMN last_quote TEXT DEFAULT ''",
     "ALTER TABLE npc_state ADD COLUMN death_turn INTEGER DEFAULT 0",
     "ALTER TABLE npc_state ADD COLUMN death_cause VARCHAR(255) DEFAULT ''",
+    "ALTER TABLE characters ADD COLUMN consecutive_death_turns INTEGER DEFAULT 0",
 )
 
 
